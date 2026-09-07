@@ -38,6 +38,8 @@ struct Cli {
     #[arg(long, global = true)]
     agent: Option<String>,
     #[arg(long, global = true)]
+    model: Option<String>,
+    #[arg(long, global = true)]
     demo: bool,
     #[arg(long, global = true)]
     json: bool,
@@ -480,7 +482,7 @@ async fn main() -> Result<()> {
         None => Client::Local(Box::new(local.clone().unwrap())),
     };
     let result:Result<()>=async{match cli.command{
- None|Some(Commands::Chat)=>{anyhow::ensure!(io::stdout().is_terminal(),"TUI requires a terminal; use `rocketry run <input> --json`");rocketry_tui::run_with_providers(client.clone(),config.default_agent.clone(),provider_status(&config,cli.connect.is_some())).await?;},
+ None|Some(Commands::Chat)=>{anyhow::ensure!(io::stdout().is_terminal(),"TUI requires a terminal; use `rocketry run <input> --json`");rocketry_tui::run_with_model(client.clone(),config.default_agent.clone(),provider_status(&config,cli.connect.is_some()),cli.model.clone()).await?;},
  Some(Commands::Context{session})=>{println!("{}",serde_json::to_string_pretty(&client.inspect(&config.default_agent,session.as_deref()).await?)?);},
  Some(Commands::Memory{session,command})=>{
     let h=local.as_ref().context("memory editing is local; use the remote agent's memory tools or /memory to inspect")?;
@@ -496,7 +498,7 @@ async fn main() -> Result<()> {
     };
     println!("{}",serde_json::to_string_pretty(&value)?);
  },
- Some(Commands::Run{input,session})=>{let r=client.start(&config.default_agent,&input,session).await?;if !cli.json{eprintln!("[run {}]",r.id);}follow(&client,&r.id,cli.json).await?;},
+ Some(Commands::Run{input,session})=>{let r=client.start_with_model(&config.default_agent,&input,session,cli.model.clone()).await?;if !cli.json{eprintln!("[run {}]",r.id);}follow(&client,&r.id,cli.json).await?;},
  Some(Commands::Resume{id})=>{client.resume(&id).await?;follow(&client,&id,cli.json).await?;},Some(Commands::Cancel{id})=>client.cancel(&id).await?,Some(Commands::Approve{id,allow})=>client.approve(&id,allow).await?,
  Some(Commands::Sessions{export})=>{let value=if let Some(id)=export{json!({"session":id,"messages":client.messages(&id).await?})}else{json!(client.sessions().await?)};println!("{}",serde_json::to_string_pretty(&value)?);},
  Some(Commands::Serve{bind})=>{rocketry_server::serve(local.context("serve cannot be used with --connect")?,&bind,std::env::var(&cli.token_env).context("missing server token")?).await?;},

@@ -90,6 +90,8 @@ pub enum ModelEvent {
 }
 #[derive(Debug, Clone)]
 pub struct ModelRequest {
+    /// Optional model selected for this run; otherwise use the provider profile default.
+    pub model: Option<String>,
     pub instructions: String,
     pub messages: Vec<Message>,
     pub tools: Vec<ToolSpec>,
@@ -229,6 +231,8 @@ pub struct Session {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Run {
+    #[serde(default)]
+    pub model: Option<String>,
     pub id: String,
     pub session_id: String,
     pub parent_id: Option<String>,

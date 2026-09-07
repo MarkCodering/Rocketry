@@ -40,6 +40,7 @@ pub struct Card {
 pub enum Overlay {
     Palette,
     Providers,
+    Model,
     Info,
     Agents,
     Search,
@@ -60,6 +61,8 @@ pub struct ProviderStatus {
     pub status: String,
 }
 pub struct App {
+    pub model: Option<String>,
+    pub model_input: String,
     pub providers: Vec<ProviderStatus>,
     pub info_title: String,
     pub info: Vec<Line<'static>>,
@@ -100,6 +103,8 @@ pub struct App {
 impl App {
     pub fn new(agent: String, backend: String) -> Self {
         Self {
+            model: None,
+            model_input: String::new(),
             providers: vec![],
             info_title: String::new(),
             info: vec![],
@@ -605,10 +610,13 @@ fn conversation(frame: &mut Frame, area: Rect, app: &App) {
                 format!(
                     "  Active agent: {} · {}",
                     app.agent,
-                    app.agents
-                        .get(&app.agent)
-                        .and_then(|a| app.providers.iter().find(|p| p.name == a.provider))
-                        .map(|p| p.model.as_str())
+                    app.model
+                        .as_deref()
+                        .or_else(|| app
+                            .agents
+                            .get(&app.agent)
+                            .and_then(|a| app.providers.iter().find(|p| p.name == a.provider))
+                            .map(|p| p.model.as_str()))
                         .unwrap_or(if app.demo {
                             "demo"
                         } else {
@@ -956,6 +964,24 @@ fn overlay_render(frame: &mut Frame, app: &App, overlay: &Overlay) {
             }
             ("PROVIDERS", lines)
         }
+        Overlay::Model => (
+            "CHANGE MODEL",
+            vec![
+                Line::styled(
+                    format!("Agent: {}", safe(&app.agent)),
+                    Style::default().fg(CYAN),
+                ),
+                Line::from("Enter a model ID supported by this provider."),
+                Line::from(""),
+                Line::styled(
+                    format!("> {}▏", safe(&app.model_input)),
+                    Style::default().fg(CYAN).bold(),
+                ),
+                Line::from(""),
+                Line::from("Enter selects · blank restores profile default · Esc cancels"),
+                Line::from("Changing models starts a new session. /agent changes provider."),
+            ],
+        ),
         Overlay::Info => (app.info_title.as_str(), app.info.clone()),
         Overlay::Search => (
             "SEARCH FLIGHT LOG",
@@ -1004,7 +1030,7 @@ fn overlay_render(frame: &mut Frame, app: &App, overlay: &Overlay) {
                 Line::from("Policies are enforced by the runtime, including demo."),
                 Line::from("Tool content is data; terminal controls are stripped."),
                 Line::from("/ opens commands · ↑↓ select · Tab complete · Enter run"),
-                Line::from("/agent [profile] or /model [profile] selects a model profile"),
+                Line::from("/agent [profile] changes provider · /model [id] changes model"),
                 Line::from("/providers /memory /context /tools inspect runtime state"),
                 Line::from("// sends a literal leading slash; unknown commands stay local"),
                 Line::from("Esc closes this panel."),
@@ -1049,6 +1075,7 @@ fn overlay_render(frame: &mut Frame, app: &App, overlay: &Overlay) {
 }
 enum Action {
     Start {
+        model: Option<String>,
         agent: String,
         input: String,
         session: Option<String>,
@@ -1093,7 +1120,7 @@ async fn worker(
                 action=actions.recv()=>{
                     let Some(action)=action else{return Err(anyhow::anyhow!("closed"));};
                     let run=match action {
-                        Action::Start{agent,input,session}=>Some(client.start(&agent,&input,session).await?),
+                        Action::Start{agent,input,session,model}=>Some(client.start_with_model(&agent,&input,session,model).await?),
                         Action::Select(id)=>Some(client.run(&id).await?),
                         Action::Approve(id,allow)=>{client.approve(&id,allow).await?;updates.send(Update::Approved).await?;None},
                         Action::Resume(id)=>{client.resume(&id).await?;selected=Some(id);None},
@@ -1195,6 +1222,20 @@ fn key(app: &mut App, k: KeyEvent, tx: &mpsc::Sender<Action>) -> bool {
             return false;
         }
         match overlay {
+            Overlay::Model => match k.code {
+                KeyCode::Char(c) if app.model_input.len() < 256 && !c.is_whitespace() => {
+                    app.model_input.push(c)
+                }
+                KeyCode::Backspace => {
+                    app.model_input.pop();
+                }
+                KeyCode::Enter => {
+                    let model = app.model_input.trim().to_string();
+                    app.overlay = None;
+                    set_model(app, &model, tx);
+                }
+                _ => {}
+            },
             Overlay::Search => match k.code {
                 KeyCode::Char(c) => app.search.push(c),
                 KeyCode::Backspace => {
@@ -1333,6 +1374,7 @@ fn key(app: &mut App, k: KeyEvent, tx: &mpsc::Sender<Action>) -> bool {
                     .to_owned();
                 if tx
                     .try_send(Action::Start {
+                        model: app.model.clone(),
                         agent: app.agent.clone(),
                         input,
                         session: app.session_id.clone(),
@@ -1376,6 +1418,14 @@ pub async fn run_with_providers(
     agent: String,
     providers: Vec<ProviderStatus>,
 ) -> Result<()> {
+    run_with_model(client, agent, providers, None).await
+}
+pub async fn run_with_model(
+    client: Client,
+    agent: String,
+    providers: Vec<ProviderStatus>,
+    model: Option<String>,
+) -> Result<()> {
     let backend = if matches!(client, Client::Remote { .. }) {
         "remote"
     } else {
@@ -1383,6 +1433,7 @@ pub async fn run_with_providers(
     };
     let mut app = App::new(agent, backend.into());
     app.providers = providers;
+    app.model = model;
     app.agents = client.agents().await?;
     if !app.agents.contains_key(&app.agent) {
         app.agent = app.agents.keys().next().cloned().unwrap_or_default();
@@ -1408,7 +1459,7 @@ pub async fn run_with_providers(
     let mut tick = tokio::time::interval(Duration::from_millis(34));
     let mut dirty = true;
     let mut last_draw = Instant::now() - Duration::from_secs(1);
-    let result:Result<()>=async{loop{tokio::select!{event=input.next()=>match event{Some(Ok(TermEvent::Key(k)))=>{if key(&mut app,k,&tx){break;}dirty=true;},Some(Ok(TermEvent::Paste(text)))=>{let room=65536usize.saturating_sub(app.composer.len());if app.overlay.is_none(){app.composer.extend(safe(&text).chars().take(room));app.slash_menu=0;app.slash_dismissed=false;}dirty=true;},Some(Ok(TermEvent::Resize(..)))=>dirty=true,Some(Err(e))=>return Err(e.into()),None=>break,_=>{}},update=inbox.recv()=>{match update{Some(Update::Catalog(s,r))=>{app.sessions=s;app.runs=r;app.connected=true;},Some(Update::Selected(r,messages))=>{app.dispatching=false;app.cards=messages.into_iter().filter(|m|!m.text.is_empty()).map(|m|Card{label:match m.role.as_str(){"user"=>"YOU","tool"=>"TOOL RESULT",_=>"ROCKETRY"}.into(),text:m.text,tone:if m.role=="user"{MUTED}else if m.role=="tool"{GREEN}else{CYAN},collapsed:m.role=="tool"}).collect();app.session_id=Some(r.session_id.clone());app.agent=r.agent.name.clone();app.demo=r.agent.provider=="demo";app.selected=Some(*r);app.usage=Usage::default();app.first_token_ms=None;app.scroll=0;app.approval=None;},Some(Update::Events(events))=>{for e in events{if app.selected.as_ref().is_some_and(|r|r.id==e.run_id){app.apply(e);}}app.connected=true;},Some(Update::Approved)=>{app.approval=None;app.notice="Approval decision saved".into();},Some(Update::Error(e))=>{app.dispatching=false;if app.overlay==Some(Overlay::Info){app.info=vec![Line::from(safe(&e))];}app.notice=e;app.connected=false;},Some(Update::Inspection{kind,agent,session,report})=>{if app.agent==agent&&app.session_id==session&&app.info_title==kind.to_uppercase(){app.info=inspection_lines(&kind,&report);}},None=>break}dirty=true;},_=tick.tick()=>{if app.active(){app.elapsed_ms=app.selected.as_ref().map(|r|now().saturating_sub(r.created_at)).unwrap_or(0);app.frame+=1;if !app.reduced_motion&&app.frame.is_multiple_of(6){dirty=true;}}}}if dirty&&last_draw.elapsed()>=Duration::from_millis(33){terminal.draw(|frame|render(frame,&app))?;dirty=false;last_draw=Instant::now();}}Ok(())}.await;
+    let result:Result<()>=async{loop{tokio::select!{event=input.next()=>match event{Some(Ok(TermEvent::Key(k)))=>{if key(&mut app,k,&tx){break;}dirty=true;},Some(Ok(TermEvent::Paste(text)))=>{let room=65536usize.saturating_sub(app.composer.len());if app.overlay.is_none(){app.composer.extend(safe(&text).chars().take(room));app.slash_menu=0;app.slash_dismissed=false;}dirty=true;},Some(Ok(TermEvent::Resize(..)))=>dirty=true,Some(Err(e))=>return Err(e.into()),None=>break,_=>{}},update=inbox.recv()=>{match update{Some(Update::Catalog(s,r))=>{app.sessions=s;app.runs=r;app.connected=true;},Some(Update::Selected(r,messages))=>{app.dispatching=false;app.cards=messages.into_iter().filter(|m|!m.text.is_empty()).map(|m|Card{label:match m.role.as_str(){"user"=>"YOU","tool"=>"TOOL RESULT",_=>"ROCKETRY"}.into(),text:m.text,tone:if m.role=="user"{MUTED}else if m.role=="tool"{GREEN}else{CYAN},collapsed:m.role=="tool"}).collect();app.session_id=Some(r.session_id.clone());app.agent=r.agent.name.clone();app.model=r.model.clone();app.demo=r.agent.provider=="demo";app.selected=Some(*r);app.usage=Usage::default();app.first_token_ms=None;app.scroll=0;app.approval=None;},Some(Update::Events(events))=>{for e in events{if app.selected.as_ref().is_some_and(|r|r.id==e.run_id){app.apply(e);}}app.connected=true;},Some(Update::Approved)=>{app.approval=None;app.notice="Approval decision saved".into();},Some(Update::Error(e))=>{app.dispatching=false;if app.overlay==Some(Overlay::Info){app.info=vec![Line::from(safe(&e))];}app.notice=e;app.connected=false;},Some(Update::Inspection{kind,agent,session,report})=>{if app.agent==agent&&app.session_id==session&&app.info_title==kind.to_uppercase(){app.info=inspection_lines(&kind,&report);}},None=>break}dirty=true;},_=tick.tick()=>{if app.active(){app.elapsed_ms=app.selected.as_ref().map(|r|now().saturating_sub(r.created_at)).unwrap_or(0);app.frame+=1;if !app.reduced_motion&&app.frame.is_multiple_of(6){dirty=true;}}}}if dirty&&last_draw.elapsed()>=Duration::from_millis(33){terminal.draw(|frame|render(frame,&app))?;dirty=false;last_draw=Instant::now();}}Ok(())}.await;
     drop(tx);
     job.abort();
     client.shutdown().await;
@@ -1444,6 +1495,7 @@ pub fn showcase() -> App {
         },
     ];
     let run = Run {
+        model: None,
         id: "demo-run".into(),
         session_id: "demo".into(),
         parent_id: None,

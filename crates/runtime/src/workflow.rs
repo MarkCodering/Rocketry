@@ -27,6 +27,7 @@ impl Harness {
         };
         tokio::fs::create_dir_all(&workspace).await?;
         let run = Run {
+            model: None,
             id: run_id,
             session_id: session.id,
             parent_id: None,
@@ -147,6 +148,7 @@ impl Harness {
                         );
                         let session = self.store.create_session(&prompt).await?;
                         let run = Run {
+                            model: None,
                             id: id(),
                             session_id: session.id,
                             parent_id: Some(root.id.clone()),

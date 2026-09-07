@@ -123,15 +123,24 @@ impl Client {
         }
     }
     pub async fn start(&self, agent: &str, input: &str, session: Option<String>) -> Result<Run> {
+        self.start_with_model(agent, input, session, None).await
+    }
+    pub async fn start_with_model(
+        &self,
+        agent: &str,
+        input: &str,
+        session: Option<String>,
+        model: Option<String>,
+    ) -> Result<Run> {
         match self {
             Self::Local(h) => {
-                let handle = h.start(agent, input, session).await?;
+                let handle = h.start_with_model(agent, input, session, model).await?;
                 h.store.run(&handle.id).await
             }
             _ => Ok(serde_json::from_value(
                 self.post(
                     "/v1/runs",
-                    json!({"agent":agent,"input":input,"session_id":session}),
+                    json!({"agent":agent,"input":input,"session_id":session,"model":model}),
                 )
                 .await?,
             )?),

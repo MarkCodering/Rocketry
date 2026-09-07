@@ -40,6 +40,8 @@ impl IntoResponse for ApiError {
 type ApiResult<T> = std::result::Result<T, ApiError>;
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct StartRequest {
+    #[serde(default)]
+    pub model: Option<String>,
     pub agent: String,
     pub input: String,
     pub session_id: Option<String>,
@@ -106,7 +108,10 @@ async fn start(
     State(s): State<AppState>,
     Json(r): Json<StartRequest>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
-    let h = s.harness.start(&r.agent, &r.input, r.session_id).await?;
+    let h = s
+        .harness
+        .start_with_model(&r.agent, &r.input, r.session_id, r.model)
+        .await?;
     Ok((
         StatusCode::ACCEPTED,
         Json(json!(s.harness.store.run(&h.id).await?)),

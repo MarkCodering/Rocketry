@@ -42,6 +42,7 @@ async fn roundtrip(protocol: Protocol, frames: Vec<Value>) -> Result<(Vec<ModelE
         output_price_per_million: Some(2.0),
     })?;
     let request = ModelRequest {
+        model: Some("selected-model".into()),
         instructions: "test".into(),
         messages: vec![Message::text("user", "test")],
         tools: vec![],
@@ -55,6 +56,9 @@ async fn roundtrip(protocol: Protocol, frames: Vec<Value>) -> Result<(Vec<ModelE
         events.push(e);
     }
     let body = state.requests.lock().await[0].clone();
+    if p.config.protocol != Protocol::Gemini {
+        assert_eq!(body["model"], "selected-model");
+    }
     server.abort();
     Ok((events, body))
 }

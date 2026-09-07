@@ -14,6 +14,10 @@ pub(super) const COMMANDS: &[Command] = &[
         description: "Choose agent / model profile",
     },
     Command {
+        name: "model",
+        description: "Change the model ID for this provider",
+    },
+    Command {
         name: "providers",
         description: "Environment credentials and models",
     },
@@ -89,12 +93,34 @@ pub(super) fn switch_agent(app: &mut App, name: &str, tx: &mpsc::Sender<Action>)
     if let Some(agent) = app.agents.get(name).cloned() {
         app.reset();
         app.agent = agent.name;
+        app.model = None;
         app.demo = agent.provider == "demo";
         send(tx, Action::Refresh, app);
         app.notice = format!("Selected {} · new session", app.agent);
     } else {
         app.notice = format!("Unknown profile: {} · /agent lists profiles", safe(name));
     }
+}
+pub(super) fn set_model(app: &mut App, model: &str, tx: &mpsc::Sender<Action>) {
+    if app.active() || app.dispatching {
+        app.notice = "Wait for this run or use /new before changing models".into();
+        return;
+    }
+    if app.demo {
+        app.notice = "Select a real provider with /agent before changing models".into();
+        return;
+    }
+    if model.len() > 256 || model.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        app.notice = "Model IDs must be at most 256 bytes without whitespace".into();
+        return;
+    }
+    app.reset();
+    app.model = (!model.is_empty()).then(|| model.to_string());
+    send(tx, Action::Refresh, app);
+    app.notice = format!(
+        "Model: {} · new session",
+        app.model.as_deref().unwrap_or("profile default")
+    );
 }
 pub(super) fn execute_command(app: &mut App, input: &str, tx: &mpsc::Sender<Action>) -> bool {
     let input = input.trim().trim_start_matches('/');
@@ -117,7 +143,15 @@ pub(super) fn execute_command(app: &mut App, input: &str, tx: &mpsc::Sender<Acti
                 app.notice = "New mission · previous sessions are saved".into();
             }
         }
-        "agent" | "model" => {
+        "model" => {
+            if arg.is_empty() {
+                app.model_input = app.model.clone().unwrap_or_default();
+                app.overlay = Some(Overlay::Model);
+            } else {
+                set_model(app, arg, tx);
+            }
+        }
+        "agent" => {
             if arg.is_empty() {
                 app.overlay = Some(Overlay::Agents);
                 app.menu = 0;

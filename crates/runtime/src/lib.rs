@@ -131,6 +131,23 @@ impl Harness {
         input: &str,
         session: Option<String>,
     ) -> Result<RunHandle> {
+        self.start_with_model(agent, input, session, None).await
+    }
+    pub async fn start_with_model(
+        &self,
+        agent: &str,
+        input: &str,
+        session: Option<String>,
+        model: Option<String>,
+    ) -> Result<RunHandle> {
+        if let Some(model) = &model {
+            anyhow::ensure!(
+                !model.trim().is_empty()
+                    && model.len() <= 256
+                    && !model.chars().any(|c| c.is_control() || c.is_whitespace()),
+                "model must be a nonempty ID of at most 256 bytes without whitespace"
+            );
+        }
         anyhow::ensure!(
             !input.trim().is_empty() && input.len() <= self.limits.context_bytes / 2,
             "input must be nonempty and fit within half the context byte budget"
@@ -151,8 +168,8 @@ impl Harness {
                     .filter(|r| r.session_id == s)
                 {
                     anyhow::ensure!(
-                        r.agent.provider == a.provider,
-                        "provider changes require a new session"
+                        r.agent.provider == a.provider && r.model == model,
+                        "provider or model changes require a new session"
                     );
                     anyhow::ensure!(
                         matches!(
@@ -174,6 +191,7 @@ impl Harness {
         };
         tokio::fs::create_dir_all(&workspace).await?;
         let run = Run {
+            model,
             id: run_id,
             session_id: session,
             parent_id: None,
@@ -486,6 +504,7 @@ impl Harness {
                         .await?;
                 }
                 let request = ModelRequest {
+                    model: run.model.clone(),
                     instructions: run.agent.instructions.clone(),
                     messages: prepared.messages,
                     tools: specs.clone(),
@@ -713,6 +732,7 @@ impl Harness {
             let input = args["input"].as_str().context("input required")?;
             let session = self.store.create_session(input).await?;
             let run = Run {
+                model: None,
                 id: id(),
                 session_id: session.id,
                 parent_id: Some(parent.id.clone()),

@@ -70,7 +70,7 @@ impl HttpProvider {
                         messages.push(json!({"role":m.role,"content":m.text}));
                     }
                 }
-                let mut b = json!({"model":self.config.model,"instructions":r.instructions,"input":messages,"stream":true,"store":false,"include":["reasoning.encrypted_content"],"max_output_tokens":r.max_output_tokens,"tools":tools.iter().map(|t|{let mut t=t.clone();t["type"]=json!("function");t}).collect::<Vec<_>>()});
+                let mut b = json!({"model":r.model.as_deref().unwrap_or(&self.config.model),"instructions":r.instructions,"input":messages,"stream":true,"store":false,"include":["reasoning.encrypted_content"],"max_output_tokens":r.max_output_tokens,"tools":tools.iter().map(|t|{let mut t=t.clone();t["type"]=json!("function");t}).collect::<Vec<_>>()});
                 if let Some(s) = &r.output_schema {
                     b["text"] = json!({"format":{"type":"json_schema","name":"result","schema":s,"strict":true}});
                 }
@@ -88,7 +88,7 @@ impl HttpProvider {
                     }
                     messages.push(v);
                 }
-                let mut b = json!({"model":self.config.model,"messages":messages,"stream":true,"stream_options":{"include_usage":true},"max_tokens":r.max_output_tokens});
+                let mut b = json!({"model":r.model.as_deref().unwrap_or(&self.config.model),"messages":messages,"stream":true,"stream_options":{"include_usage":true},"max_tokens":r.max_output_tokens});
                 if !tools.is_empty() {
                     b["tools"] = json!(
                         tools
@@ -121,7 +121,7 @@ impl HttpProvider {
                         messages.push(json!({"role":m.role,"content":m.text}));
                     }
                 }
-                let mut b = json!({"model":self.config.model,"system":r.instructions,"messages":messages,"stream":true,"max_tokens":r.max_output_tokens,"tools":r.tools.iter().map(|t|json!({"name":t.name,"description":t.description,"input_schema":t.schema})).collect::<Vec<_>>()});
+                let mut b = json!({"model":r.model.as_deref().unwrap_or(&self.config.model),"system":r.instructions,"messages":messages,"stream":true,"max_tokens":r.max_output_tokens,"tools":r.tools.iter().map(|t|json!({"name":t.name,"description":t.description,"input_schema":t.schema})).collect::<Vec<_>>()});
                 if let Some(schema) = &r.output_schema {
                     b["output_config"] = json!({"format":{"type":"json_schema","schema":schema}});
                 }
@@ -196,7 +196,7 @@ impl ModelProvider for HttpProvider {
             Protocol::Compatible => format!("{base}/chat/completions"),
             Protocol::Gemini => format!(
                 "{base}/models/{}:streamGenerateContent?alt=sse",
-                self.config.model
+                r.model.as_deref().unwrap_or(&self.config.model)
             ),
         };
         let mut attempt = 0;

@@ -427,6 +427,7 @@ mod tests {
         let store = Store::open(dir.path())?;
         let s = store.create_session("test").await?;
         let r = Run {
+            model: None,
             id: id(),
             session_id: s.id,
             parent_id: None,
