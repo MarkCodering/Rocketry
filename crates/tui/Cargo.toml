@@ -1,0 +1,25 @@
+[package]
+name = "rocketry-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+rocketry-core.workspace = true
+rocketry-runtime.workspace = true
+rocketry-store.workspace = true
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+futures.workspace = true
+reqwest.workspace = true
+unicode-width = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

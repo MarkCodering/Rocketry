@@ -1,0 +1,50 @@
+  ◈  R O C K E T R Y   /   MISSION CONTROL                                                                                                           DEMO · NO API CALLS  ·  local
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+╭ MISSIONS ─────────────╮ ╭ FLIGHT LOG ──────────────────────────────────────────────────────────────────────────────────────────────────────────╮ ╭ TELEMETRY ────────────────────╮
+│ WORKSPACE             │ │ ◆ YOU                                                                                                                │ │ EXECUTION                     │
+│ ＋  New mission  ^N    │ │ Inspect the workspace and explain how Rocketry executes a mission.                                                   │ │ State    completed            │
+│                       │ │                                                                                                                      │ │ Agent    navigator            │
+│ ▸ Map the launch sequ │ │ ◆ ROCKETRY                                                                                                           │ │ Profile  demo                 │
+│    completed          │ │ Mission accepted                                                                                                     │ │ Elapsed  2.8s                 │
+│   Review workspace ar │ │                                                                                                                      │ │ First Δ  38 ms                │
+│                       │ │ I'll inspect the workspace, trace the execution loop, and bring back a concise report.                               │ │                               │
+│ AGENT ACTIVITY        │ │                                                                                                                      │ │ MODEL USAGE                   │
+│                       │ │ Execution plan                                                                                                       │ │ Input    unavailable          │
+│                       │ │ 1. Inspect the workspace and registered tools                                                                        │ │ Output   unavailable          │
+│                       │ │ 2. Follow a model turn through durable execution                                                                     │ │ Estimate unavailable          │
+│                       │ │ 3. Summarize the result and verification evidence                                                                    │ │                               │
+│                       │ │                                                                                                                      │ │ LATEST TOOL                   │
+│                       │ │ ▸ RESULT · list_dir                                                                                                  │ │ list_dir                      │
+│                       │ │ 8 crates · core, providers, store, tools, runtime, server, tui, cli                                                  │ │ {                             │
+│                       │ │                                                                                                                      │ │   "path": "."                 │
+│                       │ │ ◆ ROCKETRY                                                                                                           │ │ }                             │
+│                       │ │ Ready for the next mission                                                                                           │ │                               │
+│                       │ │                                                                                                                      │ │ RESULT                        │
+│                       │ │ A single event-driven runtime powers the Rust SDK, HTTP API, and this Mission Control interface.                     │ │ {                             │
+│                       │ │                                                                                                                      │ │   "entries": 8,               │
+│                       │ │ Tools run behind explicit permission and execution boundaries. Sessions persist across restarts, and uncertain       │ │   "status": "complete"        │
+│                       │ │ actions are surfaced for review.                                                                                     │ │ }                             │
+│                       │ │                                                                                                                      │ │                               │
+│                       │ │   ┌─ rust                                                                                                            │ │                               │
+│                       │ │   let mut run = harness.start(                                                                                       │ │                               │
+│                       │ │       "navigator", "Inspect this workspace", None                                                                    │ │                               │
+│                       │ │   ).await?;                                                                                                          │ │                               │
+│                       │ │   let status = run.wait().await;                                                                                     │ │                               │
+│                       │ │   └─                                                                                                                 │ │                               │
+│                       │ │                                                                                                                      │ │                               │
+│                       │ │                                                                                                                      │ │                               │
+│                       │ │                                                                                                                      │ │                               │
+│                       │ │                                                                                                                      │ │                               │
+│                       │ │                                                                                                                      │ │                               │
+│                       │ │                                                                                                                      │ │                               │
+│                       │ │                                                                                                                      │ │                               │
+│                       │ │                                                                                                                      │ │                               │
+│                       │ ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ │                               │
+│                       │                                                                                                                          │                               │
+│                       │ ╭ COMPOSER · Enter send / Alt+Enter newline ───────────────────────────────────────────────────────────────────────────╮ │                               │
+│                       │ │ Describe what you want to accomplish…                                                                                │ │                               │
+│                       │ │                                                                                                                      │ │                               │
+╰───────────────────────╯ ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ ╰───────────────────────────────╯
+  Visual fixture · sample layout for deterministic rendering tests
+  ^K commands   Tab pane   ^N new   ^F find   ↑↓ navigate   ^Q exit

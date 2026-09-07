@@ -1,0 +1,13 @@
+{
+  "type": "sequence",
+  "steps": [
+    {"type": "parallel", "branches": [
+      {"type": "agent", "agent": "demo", "input": "Outline an implementation for {{input}}"},
+      {"type": "agent", "agent": "demo", "input": "Outline validation for {{input}}"}
+    ]},
+    {"type": "branch", "contains": "result",
+      "then_step": {"type": "agent", "agent": "demo", "input": "Summarize these results: {{input}}"},
+      "else_step": {"type": "agent", "agent": "demo", "input": "Explain why the workflow has no result"}
+    }
+  ]
+}

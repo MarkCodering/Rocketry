@@ -1,0 +1,26 @@
+[package]
+name = "rocketry-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+rocketry-core.workspace = true
+rocketry-runtime.workspace = true
+rocketry-store.workspace = true
+axum = "0.8"
+async-stream = "0.3"
+futures.workspace = true
+utoipa = { version = "5", features = ["axum_extras"] }
+
+[dev-dependencies]
+tempfile = "3"
+rocketry-providers.workspace = true
+tower = { version = "0.5", features = ["util"] }

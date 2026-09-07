@@ -1,0 +1,4 @@
+/target/
+/.rocketry/
+.env
+*.sqlite3*

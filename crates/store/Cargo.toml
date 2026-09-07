@@ -1,0 +1,21 @@
+[package]
+name = "rocketry-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+rocketry-core.workspace = true
+async-trait.workspace = true
+rusqlite = { version = "0.37", features = ["bundled"] }
+fs2 = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
