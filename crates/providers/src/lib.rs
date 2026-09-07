@@ -194,10 +194,20 @@ impl ModelProvider for HttpProvider {
             Protocol::Openai => format!("{base}/responses"),
             Protocol::Anthropic => format!("{base}/messages"),
             Protocol::Compatible => format!("{base}/chat/completions"),
-            Protocol::Gemini => format!(
-                "{base}/models/{}:streamGenerateContent?alt=sse",
-                r.model.as_deref().unwrap_or(&self.config.model)
-            ),
+            Protocol::Gemini => {
+                let mut endpoint = reqwest::Url::parse(base)?;
+                endpoint
+                    .path_segments_mut()
+                    .map_err(|_| anyhow::anyhow!("invalid provider URL"))?
+                    .pop_if_empty()
+                    .push("models")
+                    .push(&format!(
+                        "{}:streamGenerateContent",
+                        r.model.as_deref().unwrap_or(&self.config.model)
+                    ));
+                endpoint.query_pairs_mut().append_pair("alt", "sse");
+                endpoint.to_string()
+            }
         };
         let mut attempt = 0;
         let response = loop {

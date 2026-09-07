@@ -14,7 +14,7 @@ A crash during an external effect can leave its outcome unknown. Such a run beco
 
 Safe resumption uses persisted assistant/tool boundaries, not a regenerated tool call. Partial provider streams are not added as complete assistant messages. Transient HTTP 429/5xx responses retry before streaming begins; partially consumed streams are not automatically replayed.
 
-The original transcript remains in SQLite. Context compaction retains the initial user mission, recent complete assistant/tool groups, and short excerpts from older messages. Provider continuation blocks in retained groups are preserved. This is deterministic excerpt compaction, not model-generated semantic summarization.
+The original transcript remains in SQLite. Context compaction retains the initial user mission, recent complete assistant/tool groups, and short excerpts from older messages. Provider continuation blocks in retained groups are preserved. Before compaction, the runtime budgets instructions, tool/output schemas, a wire allowance, and up to 8 KiB of permitted saved memory. Long-term records retain the existing agent-name namespace; working notes use `session/<session-id>/<agent-name>`. Read permissions govern automatic recall. This is deterministic excerpt compaction, not model-generated semantic summarization.
 
 ## Delegation and workflows
 
@@ -36,7 +36,7 @@ Usage reports are provider-reported counts. Price estimates require explicitly c
 
 ## Provider compatibility
 
-OpenAI uses `/responses`, Anthropic `/messages`, Gemini `/models/<model>:streamGenerateContent`, and compatible endpoints `/chat/completions`. Base URLs include the API version prefix. No provider is substituted on failure. Changing provider profiles requires a new session.
+OpenAI uses `/responses`, Anthropic `/messages`, Gemini `/models/<model>:streamGenerateContent`, and compatible endpoints `/chat/completions`. Base URLs include the API version prefix. No provider is substituted on failure. Changing provider profiles or model overrides requires a new session. A run stores its optional model override, which is passed into each model request and retained on resume. The CLI and TUI support environment profiles for OpenAI, Anthropic, and Ollama; explicit TOML configuration takes precedence.
 
 Native structured-output requests are passed through and final JSON is validated locally. A model or compatible endpoint may reject a feature it does not implement; Rocketry reports the provider error. Native server-executed tools, audio/video, computer use, provider-specific realtime protocols, and interactive OAuth are outside this release.
 

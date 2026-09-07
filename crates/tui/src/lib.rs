@@ -159,8 +159,27 @@ impl App {
         self.first_token_ms = None;
         self.focus = 1;
     }
+    fn model_name(&self) -> &str {
+        self.model
+            .as_deref()
+            .or_else(|| {
+                self.agents
+                    .get(&self.agent)
+                    .and_then(|a| self.providers.iter().find(|p| p.name == a.provider))
+                    .map(|p| p.model.as_str())
+            })
+            .unwrap_or(if self.demo { "demo" } else { "profile default" })
+    }
     fn any_active(&self) -> bool {
-        self.active() || self.runs.iter().any(|r| !r.status.terminal())
+        self.dispatching
+            || self.active()
+            || self.runs.iter().any(|r| {
+                !r.status.terminal()
+                    && self
+                        .selected
+                        .as_ref()
+                        .is_none_or(|selected| selected.id != r.id)
+            })
     }
     fn active(&self) -> bool {
         self.selected.as_ref().is_some_and(|r| !r.status.terminal())
@@ -820,6 +839,7 @@ fn inspector(frame: &mut Frame, area: Rect, app: &App) {
         Line::from(format!("State    {status}")),
         Line::from(format!("Agent    {}", app.agent)),
         Line::from(format!("Profile  {model}")),
+        Line::from(format!("Model    {}", safe(app.model_name()))),
         Line::from(format!("Elapsed  {:.1}s", app.elapsed_ms as f64 / 1000.0)),
         Line::from(format!(
             "First Δ  {}",
@@ -971,6 +991,7 @@ fn overlay_render(frame: &mut Frame, app: &App, overlay: &Overlay) {
                     format!("Agent: {}", safe(&app.agent)),
                     Style::default().fg(CYAN),
                 ),
+                Line::from(format!("Current: {}", safe(app.model_name()))),
                 Line::from("Enter a model ID supported by this provider."),
                 Line::from(""),
                 Line::styled(
@@ -1403,6 +1424,25 @@ fn key(app: &mut App, k: KeyEvent, tx: &mpsc::Sender<Action>) -> bool {
     }
     false
 }
+fn paste(app: &mut App, text: &str) {
+    let (target, limit, single_line) = match app.overlay {
+        None => (&mut app.composer, 65536, false),
+        Some(Overlay::Model) => (&mut app.model_input, 256, true),
+        Some(Overlay::Search) => (&mut app.search, 65536, false),
+        _ => return,
+    };
+    for c in safe(text).chars() {
+        if single_line && c.is_whitespace() {
+            continue;
+        }
+        if target.len() + c.len_utf8() > limit {
+            break;
+        }
+        target.push(c);
+    }
+    app.slash_menu = 0;
+    app.slash_dismissed = false;
+}
 struct TerminalGuard;
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
@@ -1459,7 +1499,7 @@ pub async fn run_with_model(
     let mut tick = tokio::time::interval(Duration::from_millis(34));
     let mut dirty = true;
     let mut last_draw = Instant::now() - Duration::from_secs(1);
-    let result:Result<()>=async{loop{tokio::select!{event=input.next()=>match event{Some(Ok(TermEvent::Key(k)))=>{if key(&mut app,k,&tx){break;}dirty=true;},Some(Ok(TermEvent::Paste(text)))=>{let room=65536usize.saturating_sub(app.composer.len());if app.overlay.is_none(){app.composer.extend(safe(&text).chars().take(room));app.slash_menu=0;app.slash_dismissed=false;}dirty=true;},Some(Ok(TermEvent::Resize(..)))=>dirty=true,Some(Err(e))=>return Err(e.into()),None=>break,_=>{}},update=inbox.recv()=>{match update{Some(Update::Catalog(s,r))=>{app.sessions=s;app.runs=r;app.connected=true;},Some(Update::Selected(r,messages))=>{app.dispatching=false;app.cards=messages.into_iter().filter(|m|!m.text.is_empty()).map(|m|Card{label:match m.role.as_str(){"user"=>"YOU","tool"=>"TOOL RESULT",_=>"ROCKETRY"}.into(),text:m.text,tone:if m.role=="user"{MUTED}else if m.role=="tool"{GREEN}else{CYAN},collapsed:m.role=="tool"}).collect();app.session_id=Some(r.session_id.clone());app.agent=r.agent.name.clone();app.model=r.model.clone();app.demo=r.agent.provider=="demo";app.selected=Some(*r);app.usage=Usage::default();app.first_token_ms=None;app.scroll=0;app.approval=None;},Some(Update::Events(events))=>{for e in events{if app.selected.as_ref().is_some_and(|r|r.id==e.run_id){app.apply(e);}}app.connected=true;},Some(Update::Approved)=>{app.approval=None;app.notice="Approval decision saved".into();},Some(Update::Error(e))=>{app.dispatching=false;if app.overlay==Some(Overlay::Info){app.info=vec![Line::from(safe(&e))];}app.notice=e;app.connected=false;},Some(Update::Inspection{kind,agent,session,report})=>{if app.agent==agent&&app.session_id==session&&app.info_title==kind.to_uppercase(){app.info=inspection_lines(&kind,&report);}},None=>break}dirty=true;},_=tick.tick()=>{if app.active(){app.elapsed_ms=app.selected.as_ref().map(|r|now().saturating_sub(r.created_at)).unwrap_or(0);app.frame+=1;if !app.reduced_motion&&app.frame.is_multiple_of(6){dirty=true;}}}}if dirty&&last_draw.elapsed()>=Duration::from_millis(33){terminal.draw(|frame|render(frame,&app))?;dirty=false;last_draw=Instant::now();}}Ok(())}.await;
+    let result:Result<()>=async{loop{tokio::select!{event=input.next()=>match event{Some(Ok(TermEvent::Key(k)))=>{if key(&mut app,k,&tx){break;}dirty=true;},Some(Ok(TermEvent::Paste(text)))=>{paste(&mut app,&text);dirty=true;},Some(Ok(TermEvent::Resize(..)))=>dirty=true,Some(Err(e))=>return Err(e.into()),None=>break,_=>{}},update=inbox.recv()=>{match update{Some(Update::Catalog(s,r))=>{app.sessions=s;app.runs=r;app.connected=true;},Some(Update::Selected(r,messages))=>{app.dispatching=false;app.cards=messages.into_iter().filter(|m|!m.text.is_empty()).map(|m|Card{label:match m.role.as_str(){"user"=>"YOU","tool"=>"TOOL RESULT",_=>"ROCKETRY"}.into(),text:m.text,tone:if m.role=="user"{MUTED}else if m.role=="tool"{GREEN}else{CYAN},collapsed:m.role=="tool"}).collect();app.session_id=Some(r.session_id.clone());app.agent=r.agent.name.clone();app.model=r.model.clone();app.demo=r.agent.provider=="demo";app.selected=Some(*r);app.usage=Usage::default();app.first_token_ms=None;app.scroll=0;app.approval=None;},Some(Update::Events(events))=>{for e in events{if app.selected.as_ref().is_some_and(|r|r.id==e.run_id){app.apply(e);}}app.connected=true;},Some(Update::Approved)=>{app.approval=None;app.notice="Approval decision saved".into();},Some(Update::Error(e))=>{app.dispatching=false;if app.overlay==Some(Overlay::Info){app.info=vec![Line::from(safe(&e))];}app.notice=e;app.connected=false;},Some(Update::Inspection{kind,agent,session,report})=>{if app.agent==agent&&app.session_id==session&&app.info_title==kind.to_uppercase(){app.info=inspection_lines(&kind,&report);}},None=>break}dirty=true;},_=tick.tick()=>{if app.active(){app.elapsed_ms=app.selected.as_ref().map(|r|now().saturating_sub(r.created_at)).unwrap_or(0);app.frame+=1;if !app.reduced_motion&&app.frame.is_multiple_of(6){dirty=true;}}}}if dirty&&last_draw.elapsed()>=Duration::from_millis(33){terminal.draw(|frame|render(frame,&app))?;dirty=false;last_draw=Instant::now();}}Ok(())}.await;
     drop(tx);
     job.abort();
     client.shutdown().await;

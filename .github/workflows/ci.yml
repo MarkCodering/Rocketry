@@ -20,6 +20,7 @@ jobs:
       - run: cargo build -p rocketry-cli --locked
       - run: python3 scripts/pty_smoke.py target/debug/rocketry
       - run: python3 scripts/http_smoke.py target/debug/rocketry
+      - run: python3 scripts/provider_smoke.py target/debug/rocketry
   docker:
     runs-on: ubuntu-latest
     steps:

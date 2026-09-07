@@ -403,6 +403,19 @@ mod tests {
         }
     }
     #[test]
+    fn completed_event_overrides_stale_catalog_for_exit() {
+        let mut app = showcase();
+        let mut completed = app.selected.clone().unwrap();
+        completed.status = RunStatus::Completed;
+        let mut stale = completed.clone();
+        stale.status = RunStatus::Running;
+        app.selected = Some(completed);
+        app.runs = vec![stale];
+        assert!(!app.any_active());
+        app.dispatching = true;
+        assert!(app.any_active());
+    }
+    #[test]
     fn full_queue_preserves_prompt() {
         let (tx, _rx) = mpsc::channel(1);
         tx.try_send(Action::Refresh)

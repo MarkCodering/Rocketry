@@ -190,7 +190,7 @@ async fn filesystem_lifecycle_and_memory_registry() -> Result<()> {
         )
         .await?;
     assert!(!dir.path().join("notes/b.txt").exists());
-    let store = rocketry_store::Store::open(dir.path().join("store"))?;
+    let store = rocketry_store::Store::open(&dir.path().join("store"))?;
     let tools = rocketry_tools::builtins(std::sync::Arc::new(backend), store);
     tools["memory_put"]
         .execute(json!({"key":"key","value":"fact"}), context(dir.path()))

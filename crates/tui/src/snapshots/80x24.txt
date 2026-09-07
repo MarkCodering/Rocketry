@@ -16,9 +16,9 @@
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 
-╭ COMPOSER · Enter send / Alt+Enter newline ───────────────────────────────────╮
-│ Describe what you want to accomplish…                                        │
+╭ COMPOSER · Enter send · / commands ──────────────────────────────────────────╮
+│ Describe a mission, or type / for commands…                                  │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
   Visual fixture · sample layout for deterministic rendering tests
-  ^K commands   Tab pane   ^N new   ^F find   ↑↓ navigate   ^Q exit
+  / commands   ^K menu   Tab pane   ^N new   ^F find   ^Q exit

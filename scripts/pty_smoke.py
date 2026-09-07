@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Exercise the real terminal binary; no provider credentials or Python packages needed."""
-import fcntl, json, os, pathlib, pty, select, signal, sqlite3, struct, subprocess, sys, tempfile, termios, time
+import fcntl, json, os, pathlib, pty, re, select, signal, sqlite3, struct, subprocess, sys, tempfile, termios, time
 binary = str(pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else 'target/debug/rocketry').resolve())
 out = pathlib.Path('target/pty'); out.mkdir(parents=True, exist_ok=True)
 import faulthandler
@@ -48,7 +48,7 @@ for width, height in [(80,24),(120,40),(180,50)]:
             wait_for(lambda:b'R O C K E T R Y' in capture or b'MISSION CONTROL' in capture)
             send(b'\x0b'); drain(.1); send(b'\x1b'); drain(.1)
             send(b'/prov'); drain(.1); send(b'\t'); drain(.1); send(b'\r'); drain(.2)
-            assert b'CREDENTIAL DISCOVERY' in capture
+            assert b'CREDENTIALDISCOVERY' in re.sub(rb'\s+', b'', re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]', b'', capture))
             send(b'\x1b'); drain(.1)
             for command, title in [(b'/help', b'FLIGHT MANUAL'), (b'/context', b'CONTEXT'), (b'/memory', b'MEMORY'), (b'/tools', b'TOOLS')]:
                 send(command+b'\r'); drain(.35)
