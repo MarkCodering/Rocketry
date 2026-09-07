@@ -177,6 +177,8 @@ Native tool schemas are validated at startup and arguments before execution. MCP
 
 ## Verify
 
+September 7 local verification: 42 tests passed, formatting and Clippy passed, and the installed CLI passed provider-fixture, remote HTTP, and terminal smoke tests at three sizes. Live provider calls remain unverified; the Docker daemon was unavailable. See [verification evidence](docs/verification.md) for coverage and historical results.
+
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings

@@ -2,7 +2,24 @@
 
 Local verification on 2026-09-05 used an Apple M2 (aarch64), 8 GiB RAM, macOS 26.6.2, and Rust 1.98.0. Benchmarks used release builds. These results describe deterministic local workloads, not cloud model throughput.
 
-## Checks
+## September 7 feature verification
+
+The CLI was rebuilt in release mode and installed through `./scripts/install.sh --offline` at `~/.cargo/bin/rocketry`. The installed executable resolves on the shell PATH and reports version 0.1.0.
+
+| Check | Result |
+| --- | --- |
+| Workspace tests, all features, locked/offline dependencies | 42 passed; 1 Docker test ignored |
+| Formatting and Clippy, all targets, warnings denied | Passed |
+| Installed CLI: `scripts/provider_smoke.py` | OpenAI, Anthropic, and Ollama environment profiles; authenticated local protocol fixtures; CLI/TUI model overrides; persisted model ID; memory CLI lifecycle; credential values absent from output |
+| Installed CLI: `scripts/pty_smoke.py` | Slash completion and provider/context/memory/tool panels, Unicode paste, resize, completed/cancelled runs, terminal restoration at 80×24, 120×40, and 180×50 |
+| Installed CLI: `scripts/http_smoke.py` | Authenticated remote execution, SSE reconnect, OpenAPI, metrics, and remote context inspection |
+| Memory/context integration | Agent memory across process restart, session and agent separation, approval-aware automatic recall, bounded context, deletion of search-index entries |
+| Host filesystem lifecycle | Create, write, move without overwrite, reject traversal, remove one file, preserve directories |
+| Docker | Not rerun: local daemon unavailable on September 7 |
+
+The protocol smoke test uses only local HTTP fixtures and synthetic credentials. It does not establish live cloud access or installed Ollama model availability. The benchmark and Docker evidence below is historical September 5 evidence and was not refreshed for these changes.
+
+## September 5 checks
 
 | Check | Result |
 | --- | --- |

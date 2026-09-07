@@ -6,26 +6,26 @@
 │ ＋  New mission  ^N    │ │ Inspect the workspace and explain how Rocketry executes a mission.                                                   │ │ State    completed            │
 │                       │ │                                                                                                                      │ │ Agent    navigator            │
 │ ▸ Map the launch sequ │ │ ◆ ROCKETRY                                                                                                           │ │ Profile  demo                 │
-│    completed          │ │ Mission accepted                                                                                                     │ │ Elapsed  2.8s                 │
-│   Review workspace ar │ │                                                                                                                      │ │ First Δ  38 ms                │
-│                       │ │ I'll inspect the workspace, trace the execution loop, and bring back a concise report.                               │ │                               │
-│ AGENT ACTIVITY        │ │                                                                                                                      │ │ MODEL USAGE                   │
-│                       │ │ Execution plan                                                                                                       │ │ Input    unavailable          │
-│                       │ │ 1. Inspect the workspace and registered tools                                                                        │ │ Output   unavailable          │
-│                       │ │ 2. Follow a model turn through durable execution                                                                     │ │ Estimate unavailable          │
-│                       │ │ 3. Summarize the result and verification evidence                                                                    │ │                               │
-│                       │ │                                                                                                                      │ │ LATEST TOOL                   │
-│                       │ │ ▸ RESULT · list_dir                                                                                                  │ │ list_dir                      │
-│                       │ │ 8 crates · core, providers, store, tools, runtime, server, tui, cli                                                  │ │ {                             │
-│                       │ │                                                                                                                      │ │   "path": "."                 │
-│                       │ │ ◆ ROCKETRY                                                                                                           │ │ }                             │
-│                       │ │ Ready for the next mission                                                                                           │ │                               │
-│                       │ │                                                                                                                      │ │ RESULT                        │
-│                       │ │ A single event-driven runtime powers the Rust SDK, HTTP API, and this Mission Control interface.                     │ │ {                             │
-│                       │ │                                                                                                                      │ │   "entries": 8,               │
-│                       │ │ Tools run behind explicit permission and execution boundaries. Sessions persist across restarts, and uncertain       │ │   "status": "complete"        │
-│                       │ │ actions are surfaced for review.                                                                                     │ │ }                             │
+│    completed          │ │ Mission accepted                                                                                                     │ │ Model    demo                 │
+│   Review workspace ar │ │                                                                                                                      │ │ Elapsed  2.8s                 │
+│                       │ │ I'll inspect the workspace, trace the execution loop, and bring back a concise report.                               │ │ First Δ  38 ms                │
+│ AGENT ACTIVITY        │ │                                                                                                                      │ │                               │
+│                       │ │ Execution plan                                                                                                       │ │ MODEL USAGE                   │
+│                       │ │ 1. Inspect the workspace and registered tools                                                                        │ │ Input    unavailable          │
+│                       │ │ 2. Follow a model turn through durable execution                                                                     │ │ Output   unavailable          │
+│                       │ │ 3. Summarize the result and verification evidence                                                                    │ │ Estimate unavailable          │
 │                       │ │                                                                                                                      │ │                               │
+│                       │ │ ▸ RESULT · list_dir                                                                                                  │ │ LATEST TOOL                   │
+│                       │ │ 8 crates · core, providers, store, tools, runtime, server, tui, cli                                                  │ │ list_dir                      │
+│                       │ │                                                                                                                      │ │ {                             │
+│                       │ │ ◆ ROCKETRY                                                                                                           │ │   "path": "."                 │
+│                       │ │ Ready for the next mission                                                                                           │ │ }                             │
+│                       │ │                                                                                                                      │ │                               │
+│                       │ │ A single event-driven runtime powers the Rust SDK, HTTP API, and this Mission Control interface.                     │ │ RESULT                        │
+│                       │ │                                                                                                                      │ │ {                             │
+│                       │ │ Tools run behind explicit permission and execution boundaries. Sessions persist across restarts, and uncertain       │ │   "entries": 8,               │
+│                       │ │ actions are surfaced for review.                                                                                     │ │   "status": "complete"        │
+│                       │ │                                                                                                                      │ │ }                             │
 │                       │ │   ┌─ rust                                                                                                            │ │                               │
 │                       │ │   let mut run = harness.start(                                                                                       │ │                               │
 │                       │ │       "navigator", "Inspect this workspace", None                                                                    │ │                               │

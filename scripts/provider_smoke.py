@@ -39,7 +39,9 @@ try:
         before=termios.tcgetattr(slave)
         fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',32,110,0,0))
         def setup(): os.setsid();fcntl.ioctl(slave,termios.TIOCSCTTY,0)
-        proc=subprocess.Popen(base+['--agent','openai'],stdin=slave,stdout=slave,stderr=slave,env=env,preexec_fn=setup)
+        # Keep the controlling PTY alive briefly after exit to inspect restored modes on macOS.
+        wrapper = '"$@"; code=$?; printf "\\nROCKETRY_EXIT:%s\\n" "$code"; sleep 1; exit "$code"'
+        proc=subprocess.Popen(['/bin/sh','-c',wrapper,'rocketry-provider-wrapper']+base+['--agent','openai'],stdin=slave,stdout=slave,stderr=slave,env=env,preexec_fn=setup)
         capture=bytearray()
         def drain(duration=.1):
             end=time.monotonic()+duration
@@ -68,9 +70,11 @@ try:
                 return len(rows)==4 and rows[-1]['status']=='completed' and rows[-1]['model']=='tui-selected'
             wait_for(completed)
             drain(.3);os.write(master,b'/quit\r');drain(.3)
+            wait_for(lambda:b'ROCKETRY_EXIT:0' in capture,seconds=5)
+            assert termios.tcgetattr(slave)==before
+            assert b'\x1b[?1049l' in capture
             proc.wait(timeout=5)
             assert proc.returncode==0
-            assert termios.tcgetattr(slave)==before
             assert b'fixture-secret-' not in capture
         finally:
             pathlib.Path('target').mkdir(exist_ok=True)
