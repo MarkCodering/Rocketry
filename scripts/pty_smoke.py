@@ -47,6 +47,16 @@ for width, height in [(80,24),(120,40),(180,50)]:
         try:
             wait_for(lambda:b'R O C K E T R Y' in capture or b'MISSION CONTROL' in capture)
             send(b'\x0b'); drain(.1); send(b'\x1b'); drain(.1)
+            send(b'/prov'); drain(.1); send(b'\t'); drain(.1); send(b'\r'); drain(.2)
+            assert b'CREDENTIAL DISCOVERY' in capture
+            send(b'\x1b'); drain(.1)
+            for command, title in [(b'/help', b'FLIGHT MANUAL'), (b'/context', b'CONTEXT'), (b'/memory', b'MEMORY'), (b'/tools', b'TOOLS')]:
+                send(command+b'\r'); drain(.35)
+                assert title in capture
+                send(b'\x1b'); drain(.1)
+            send(b'/unknown\r'); drain(.1)
+            assert statuses()==[], 'slash commands dispatched a model run'
+
             send(b'\x1b[200~'+ 'Inspect 火箭 workspace'.encode()+b'\x1b[201~'); drain(.1);send(b'\r')
             wait_for(lambda:statuses()==['completed'])
             drain(.2)

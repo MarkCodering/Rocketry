@@ -27,6 +27,12 @@ with tempfile.TemporaryDirectory(prefix='rocketry-http-') as data:
         assert ids and all(i>cursor for i in ids)
         assert json.load(get('/v1/openapi.json'))['paths']['/v1/runs']
         assert b'rocketry_active_runs 0' in get('/metrics').read()
+        context=json.load(get('/v1/agents/demo/context'))
+        assert context['agent']=='demo' and context['context']['total_bytes'] <= context['limit_bytes']
+        inspected=subprocess.run([binary,'--connect',url,'--agent','demo','context'],env=env,capture_output=True,text=True,timeout=10)
+        assert inspected.returncode==0,inspected.stderr
+        assert json.loads(inspected.stdout)['agent']=='demo'
+
         print(json.dumps({'authentication':True,'remote_cli_run':True,'sse_reconnect':True,'openapi':True,'metrics':True},indent=2))
     finally:
         server.send_signal(signal.SIGINT)

@@ -195,3 +195,38 @@ async fn large_memory_is_bounded_and_forget_removes_search_index() -> Result<()>
     h.shutdown().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn selected_model_is_persisted_sent_and_requires_a_new_session_to_change() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let requests = Arc::new(Mutex::new(vec![]));
+    let h = harness(dir.path(), requests.clone(), false, false)?;
+    let mut handle = h
+        .start_with_model("navigator", "test", None, Some("chosen-model".into()))
+        .await?;
+    assert_eq!(handle.wait().await, RunStatus::Completed);
+    let run = h.store.run(&handle.id).await?;
+    assert_eq!(run.model.as_deref(), Some("chosen-model"));
+    assert_eq!(
+        requests.lock().await[0].model.as_deref(),
+        Some("chosen-model")
+    );
+    assert!(
+        h.start_with_model(
+            "navigator",
+            "change",
+            Some(run.session_id),
+            Some("different".into())
+        )
+        .await
+        .is_err()
+    );
+    h.shutdown().await;
+    drop(h);
+    let store = Store::open(dir.path())?;
+    assert_eq!(
+        store.run(&run.id).await?.model.as_deref(),
+        Some("chosen-model")
+    );
+    Ok(())
+}

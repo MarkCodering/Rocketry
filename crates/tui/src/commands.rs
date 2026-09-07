@@ -324,3 +324,93 @@ pub(super) fn inspection_lines(kind: &str, report: &Value) -> Vec<Line<'static>>
     }
     lines
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn press(app: &mut App, code: KeyCode, tx: &mpsc::Sender<Action>) -> bool {
+        key(app, KeyEvent::new(code, KeyModifiers::NONE), tx)
+    }
+    #[test]
+    fn slash_filter_complete_and_unknown_never_dispatch() {
+        let (tx, mut rx) = mpsc::channel(8);
+        let mut app = App::new("navigator".into(), "local".into());
+        app.composer = "/prov".into();
+        press(&mut app, KeyCode::Tab, &tx);
+        assert_eq!(app.composer, "/providers ");
+        press(&mut app, KeyCode::Enter, &tx);
+        assert!(app.overlay == Some(Overlay::Providers));
+        assert!(rx.try_recv().is_err());
+        press(&mut app, KeyCode::Esc, &tx);
+        app.composer = "/unknown".into();
+        press(&mut app, KeyCode::Enter, &tx);
+        assert!(app.notice.contains("Unknown command"));
+        assert!(rx.try_recv().is_err());
+        app.composer = "//workspace".into();
+        press(&mut app, KeyCode::Enter, &tx);
+        assert!(matches!(rx.try_recv(), Ok(Action::Start { input, .. }) if input == "/workspace"));
+    }
+    #[test]
+    fn model_selection_reaches_request_and_guards_active_runs() {
+        let (tx, mut rx) = mpsc::channel(8);
+        let mut app = App::new("openai".into(), "local".into());
+        app.session_id = Some("old-session".into());
+        app.composer = "/model selected-model".into();
+        press(&mut app, KeyCode::Enter, &tx);
+        assert_eq!(app.model.as_deref(), Some("selected-model"));
+        assert!(app.session_id.is_none());
+        assert!(matches!(rx.try_recv(), Ok(Action::Refresh)));
+        app.composer = "hello".into();
+        press(&mut app, KeyCode::Enter, &tx);
+        assert!(
+            matches!(rx.try_recv(), Ok(Action::Start { model, session: None, .. }) if model.as_deref() == Some("selected-model"))
+        );
+        app.composer = "/model another".into();
+        press(&mut app, KeyCode::Enter, &tx);
+        assert_eq!(app.model.as_deref(), Some("selected-model"));
+        assert!(rx.try_recv().is_err());
+    }
+    #[test]
+    fn command_panels_fit_supported_terminals() {
+        for (width, height) in [(40, 12), (80, 24), (120, 40), (180, 50)] {
+            let mut terminal =
+                Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            let mut app = App::new("openai".into(), "local".into());
+            app.providers = vec![ProviderStatus {
+                name: "openai".into(),
+                model: "selected-model".into(),
+                status: "OPENAI_API_KEY detected · not validated".into(),
+            }];
+            for overlay in [
+                None,
+                Some(Overlay::Providers),
+                Some(Overlay::Model),
+                Some(Overlay::Palette),
+            ] {
+                app.overlay = overlay;
+                app.composer = "/".into();
+                terminal.draw(|f| render(f, &app)).unwrap();
+                let text = terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .map(|c| c.symbol())
+                    .collect::<String>();
+                assert!(text.contains("R O C K E T R Y"));
+                assert!(!text.contains("secret-sentinel"));
+            }
+        }
+    }
+    #[test]
+    fn full_queue_preserves_prompt() {
+        let (tx, _rx) = mpsc::channel(1);
+        tx.try_send(Action::Refresh)
+            .unwrap_or_else(|_| panic!("queue should have capacity"));
+        let mut app = App::new("openai".into(), "local".into());
+        app.composer = "preserve draft".into();
+        press(&mut app, KeyCode::Enter, &tx);
+        assert_eq!(app.composer, "preserve draft");
+        assert!(!app.dispatching);
+    }
+}
