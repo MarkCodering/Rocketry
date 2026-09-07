@@ -65,6 +65,18 @@ impl Client {
             _ => Ok(serde_json::from_value(self.get("/v1/agents").await?)?),
         }
     }
+    pub async fn inspect(&self, agent: &str, session: Option<&str>) -> Result<Value> {
+        match self {
+            Self::Local(h) => h.inspect_context(agent, session).await,
+            Self::Remote { url, .. } => {
+                let mut endpoint = reqwest::Url::parse(url)?;
+                endpoint.path_segments_mut().map_err(|_| anyhow::anyhow!("invalid server URL"))?
+                    .pop_if_empty().extend(["v1", "agents", agent, "context"]);
+                if let Some(session) = session { endpoint.query_pairs_mut().append_pair("session", session); }
+                self.get(&format!("{}{}", endpoint.path().strip_prefix(reqwest::Url::parse(url)?.path().trim_end_matches('/')).unwrap_or(endpoint.path()), endpoint.query().map(|q| format!("?{q}")).unwrap_or_default())).await
+            }
+        }
+    }
     pub async fn sessions(&self) -> Result<Vec<Session>> {
         match self {
             Self::Local(h) => h.store.sessions().await,
