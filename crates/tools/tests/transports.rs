@@ -120,3 +120,100 @@ async fn streamable_http_discovery_and_call() -> Result<()> {
     server.abort();
     Ok(())
 }
+
+#[tokio::test]
+async fn filesystem_lifecycle_and_memory_registry() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let backend = rocketry_tools::HostBackend;
+    backend
+        .execute(
+            "create_dir",
+            json!({"path":"notes/nested"}),
+            context(dir.path()),
+        )
+        .await?;
+    backend
+        .execute(
+            "write_file",
+            json!({"path":"notes/nested/a.txt","content":"original"}),
+            context(dir.path()),
+        )
+        .await?;
+    backend
+        .execute(
+            "move_file",
+            json!({"path":"notes/nested/a.txt","destination":"notes/b.txt"}),
+            context(dir.path()),
+        )
+        .await?;
+    assert!(!dir.path().join("notes/nested/a.txt").exists());
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("notes/b.txt"))?,
+        "original"
+    );
+    std::fs::write(dir.path().join("existing.txt"), "preserve")?;
+    assert!(
+        backend
+            .execute(
+                "move_file",
+                json!({"path":"notes/b.txt","destination":"existing.txt"}),
+                context(dir.path())
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("existing.txt"))?,
+        "preserve"
+    );
+    assert!(
+        backend
+            .execute(
+                "move_file",
+                json!({"path":"notes/b.txt","destination":"../escape.txt"}),
+                context(dir.path())
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        backend
+            .execute("remove_file", json!({"path":"notes"}), context(dir.path()))
+            .await
+            .is_err()
+    );
+    backend
+        .execute(
+            "remove_file",
+            json!({"path":"notes/b.txt"}),
+            context(dir.path()),
+        )
+        .await?;
+    assert!(!dir.path().join("notes/b.txt").exists());
+    let store = rocketry_store::Store::open(dir.path().join("store"))?;
+    let tools = rocketry_tools::builtins(std::sync::Arc::new(backend), store);
+    tools["memory_put"]
+        .execute(json!({"key":"key","value":"fact"}), context(dir.path()))
+        .await?;
+    assert_eq!(
+        tools["memory_list"]
+            .execute(json!({}), context(dir.path()))
+            .await?[0]["value"],
+        "fact"
+    );
+    assert_eq!(
+        tools["memory_delete"]
+            .execute(json!({"key":"key"}), context(dir.path()))
+            .await?["deleted"],
+        true
+    );
+    assert!(
+        tools["memory_list"]
+            .execute(json!({}), context(dir.path()))
+            .await?
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    Ok(())
+}
