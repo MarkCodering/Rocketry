@@ -90,6 +90,18 @@ enum Commands {
         command: ConfigCommand,
     },
     Doctor,
+    /// Inspect context, memory recall, tool policies, and execution limits.
+    Context {
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Manage durable agent memory, or session working notes with --session.
+    Memory {
+        #[arg(long)]
+        session: Option<String>,
+        #[command(subcommand)]
+        command: MemoryCommand,
+    },
     TuiPreview {
         #[arg(long, default_value_t = 180)]
         width: u16,
@@ -99,6 +111,13 @@ enum Commands {
         output: PathBuf,
     },
     Openapi,
+}
+#[derive(Subcommand)]
+enum MemoryCommand {
+    List,
+    Search { query: String },
+    Put { key: String, value: String },
+    Forget { key: String },
 }
 #[derive(Subcommand)]
 enum ConfigCommand {
@@ -462,6 +481,21 @@ async fn main() -> Result<()> {
     };
     let result:Result<()>=async{match cli.command{
  None|Some(Commands::Chat)=>{anyhow::ensure!(io::stdout().is_terminal(),"TUI requires a terminal; use `rocketry run <input> --json`");rocketry_tui::run_with_providers(client.clone(),config.default_agent.clone(),provider_status(&config,cli.connect.is_some())).await?;},
+ Some(Commands::Context{session})=>{println!("{}",serde_json::to_string_pretty(&client.inspect(&config.default_agent,session.as_deref()).await?)?);},
+ Some(Commands::Memory{session,command})=>{
+    let h=local.as_ref().context("memory editing is local; use the remote agent's memory tools or /memory to inspect")?;
+    let ns=if let Some(session)=session {
+        anyhow::ensure!(h.store.sessions().await?.iter().any(|s|s.id==session),"unknown session");
+        rocketry_runtime::session_namespace(&session,&config.default_agent)
+    }else{config.default_agent.clone()};
+    let value=match command {
+        MemoryCommand::List=>h.store.memory_list(&ns).await?,
+        MemoryCommand::Search{query}=>h.store.memory_search(&ns,&query).await?,
+        MemoryCommand::Put{key,value}=>{h.store.memory_put(&ns,&key,&value).await?;json!({"stored":true,"key":key})},
+        MemoryCommand::Forget{key}=>json!({"deleted":h.store.memory_delete(&ns,&key).await?,"key":key}),
+    };
+    println!("{}",serde_json::to_string_pretty(&value)?);
+ },
  Some(Commands::Run{input,session})=>{let r=client.start(&config.default_agent,&input,session).await?;if !cli.json{eprintln!("[run {}]",r.id);}follow(&client,&r.id,cli.json).await?;},
  Some(Commands::Resume{id})=>{client.resume(&id).await?;follow(&client,&id,cli.json).await?;},Some(Commands::Cancel{id})=>client.cancel(&id).await?,Some(Commands::Approve{id,allow})=>client.approve(&id,allow).await?,
  Some(Commands::Sessions{export})=>{let value=if let Some(id)=export{json!({"session":id,"messages":client.messages(&id).await?})}else{json!(client.sessions().await?)};println!("{}",serde_json::to_string_pretty(&value)?);},
@@ -470,4 +504,72 @@ async fn main() -> Result<()> {
  Some(Commands::Reconcile{id,call,result})=>{local.context("use the reconciliation HTTP endpoint for remote runs")?.reconcile(&id,&call,serde_json::from_str(&result)?).await?;},_=>unreachable!()};Ok(())}.await;
     client.shutdown().await;
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn fixture() -> ProviderConfig {
+        ProviderConfig {
+            protocol: rocketry_providers::Protocol::Openai,
+            model: "env-model".into(),
+            base_url: "http://localhost:9999/v1".into(),
+            api_key_env: Some("OPENAI_API_KEY".into()),
+            input_price_per_million: None,
+            output_price_per_million: None,
+        }
+    }
+    #[test]
+    fn environment_bootstraps_complete_agent_and_demo_overrides() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("absent.toml");
+        let cli = Cli::parse_from(["rocketry", "--config", path.to_str().unwrap()]);
+        let c = configuration_with(&cli, vec![("openai".into(), fixture())], |_| None)?;
+        assert_eq!(c.agents["navigator"].provider, "openai");
+        for tool in [
+            "memory_put",
+            "session_memory_put",
+            "read_file",
+            "execute",
+            "delegate",
+        ] {
+            assert!(c.agents["navigator"].tools.contains(&tool.to_owned()));
+        }
+        let cli = Cli::parse_from(["rocketry", "--config", path.to_str().unwrap(), "--demo"]);
+        assert_eq!(
+            configuration_with(&cli, vec![("openai".into(), fixture())], |_| None)?.default_agent,
+            "demo"
+        );
+        Ok(())
+    }
+    #[test]
+    fn explicit_profiles_and_default_are_preserved() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("rocketry.toml");
+        let mut existing = Config::default();
+        let mut p = fixture();
+        p.model = "explicit-model".into();
+        existing.providers.insert("openai".into(), p);
+        std::fs::write(&path, toml::to_string(&existing)?)?;
+        let cli = Cli::parse_from(["rocketry", "--config", path.to_str().unwrap()]);
+        let c = configuration_with(&cli, vec![("openai".into(), fixture())], |_| None)?;
+        assert_eq!(c.providers["openai"].model, "explicit-model");
+        assert_eq!(c.agents["navigator"].provider, "demo");
+        Ok(())
+    }
+    #[test]
+    fn remote_does_not_register_local_environment_profiles() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("absent.toml");
+        let cli = Cli::parse_from([
+            "rocketry",
+            "--config",
+            path.to_str().unwrap(),
+            "--connect",
+            "http://localhost:8787",
+        ]);
+        let c = configuration_with(&cli, vec![("openai".into(), fixture())], |_| None)?;
+        assert!(c.providers.is_empty());
+        Ok(())
+    }
 }

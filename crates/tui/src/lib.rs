@@ -1034,7 +1034,15 @@ fn overlay_render(frame: &mut Frame, app: &App, overlay: &Overlay) {
     frame.render_widget(
         Paragraph::new(lines)
             .block(block(title, true).title_bottom(" PgUp/PgDn scroll · Esc close "))
-            .scroll((app.overlay_scroll, 0))
+            .scroll((
+                if matches!(overlay, Overlay::Palette | Overlay::Agents) {
+                    app.overlay_scroll
+                        .max(app.menu.saturating_sub(height.saturating_sub(5) as usize) as u16)
+                } else {
+                    app.overlay_scroll
+                },
+                0,
+            ))
             .wrap(Wrap { trim: false }),
         rect,
     );
@@ -1147,7 +1155,7 @@ fn key(app: &mut App, k: KeyEvent, tx: &mpsc::Sender<Action>) -> bool {
                 return false;
             }
             KeyCode::Char('q') => {
-                if app.any_active() {
+                if app.any_active() || app.dispatching {
                     app.overlay = Some(Overlay::Quit);
                     return false;
                 }
@@ -1161,11 +1169,7 @@ fn key(app: &mut App, k: KeyEvent, tx: &mpsc::Sender<Action>) -> bool {
                 }
                 return false;
             }
-            KeyCode::Char('n') => {
-                app.reset();
-                send(tx, Action::Refresh, app);
-                return false;
-            }
+            KeyCode::Char('n') => return execute_command(app, "new", tx),
             KeyCode::Char('f') => {
                 app.overlay = Some(Overlay::Search);
                 return false;
@@ -1321,21 +1325,26 @@ fn key(app: &mut App, k: KeyEvent, tx: &mpsc::Sender<Action>) -> bool {
         }
         KeyCode::Enter if app.focus == 1 => {
             if !app.active() && !app.dispatching && !app.composer.trim().is_empty() {
-                let mut input = std::mem::take(&mut app.composer);
-                if input.starts_with("//") {
-                    input.remove(0);
-                }
-                send(
-                    tx,
-                    Action::Start {
+                let input = app
+                    .composer
+                    .strip_prefix('/')
+                    .filter(|_| app.composer.starts_with("//"))
+                    .unwrap_or(&app.composer)
+                    .to_owned();
+                if tx
+                    .try_send(Action::Start {
                         agent: app.agent.clone(),
                         input,
                         session: app.session_id.clone(),
-                    },
-                    app,
-                );
-                app.notice = "Dispatching mission…".into();
-                app.dispatching = true;
+                    })
+                    .is_ok()
+                {
+                    app.composer.clear();
+                    app.notice = "Dispatching mission…".into();
+                    app.dispatching = true;
+                } else {
+                    app.notice = "Control queue is busy; your draft is preserved".into();
+                }
             }
         }
         KeyCode::Backspace if app.focus == 1 => {
@@ -1399,7 +1408,7 @@ pub async fn run_with_providers(
     let mut tick = tokio::time::interval(Duration::from_millis(34));
     let mut dirty = true;
     let mut last_draw = Instant::now() - Duration::from_secs(1);
-    let result:Result<()>=async{loop{tokio::select!{event=input.next()=>match event{Some(Ok(TermEvent::Key(k)))=>{if key(&mut app,k,&tx){break;}dirty=true;},Some(Ok(TermEvent::Paste(text)))=>{let room=65536usize.saturating_sub(app.composer.len());if app.overlay.is_none(){app.composer.extend(safe(&text).chars().take(room));app.slash_menu=0;app.slash_dismissed=false;}dirty=true;},Some(Ok(TermEvent::Resize(..)))=>dirty=true,Some(Err(e))=>return Err(e.into()),None=>break,_=>{}},update=inbox.recv()=>{match update{Some(Update::Catalog(s,r))=>{app.sessions=s;app.runs=r;app.connected=true;},Some(Update::Selected(r,messages))=>{app.dispatching=false;app.cards=messages.into_iter().filter(|m|!m.text.is_empty()).map(|m|Card{label:match m.role.as_str(){"user"=>"YOU","tool"=>"TOOL RESULT",_=>"ROCKETRY"}.into(),text:m.text,tone:if m.role=="user"{MUTED}else if m.role=="tool"{GREEN}else{CYAN},collapsed:m.role=="tool"}).collect();app.session_id=Some(r.session_id.clone());app.agent=r.agent.name.clone();app.demo=r.agent.provider=="demo";app.selected=Some(*r);app.usage=Usage::default();app.first_token_ms=None;app.scroll=0;app.approval=None;},Some(Update::Events(events))=>{for e in events{app.apply(e);}app.connected=true;},Some(Update::Approved)=>{app.approval=None;app.notice="Approval decision saved".into();},Some(Update::Error(e))=>{app.dispatching=false;if app.overlay==Some(Overlay::Info){app.info=vec![Line::from(safe(&e))];}app.notice=e;app.connected=false;},Some(Update::Inspection{kind,agent,session,report})=>{if app.agent==agent&&app.session_id==session&&app.info_title==kind.to_uppercase(){app.info=inspection_lines(&kind,&report);}},None=>break}dirty=true;},_=tick.tick()=>{if app.active(){app.elapsed_ms=app.selected.as_ref().map(|r|now().saturating_sub(r.created_at)).unwrap_or(0);app.frame+=1;if !app.reduced_motion&&app.frame.is_multiple_of(6){dirty=true;}}}}if dirty&&last_draw.elapsed()>=Duration::from_millis(33){terminal.draw(|frame|render(frame,&app))?;dirty=false;last_draw=Instant::now();}}Ok(())}.await;
+    let result:Result<()>=async{loop{tokio::select!{event=input.next()=>match event{Some(Ok(TermEvent::Key(k)))=>{if key(&mut app,k,&tx){break;}dirty=true;},Some(Ok(TermEvent::Paste(text)))=>{let room=65536usize.saturating_sub(app.composer.len());if app.overlay.is_none(){app.composer.extend(safe(&text).chars().take(room));app.slash_menu=0;app.slash_dismissed=false;}dirty=true;},Some(Ok(TermEvent::Resize(..)))=>dirty=true,Some(Err(e))=>return Err(e.into()),None=>break,_=>{}},update=inbox.recv()=>{match update{Some(Update::Catalog(s,r))=>{app.sessions=s;app.runs=r;app.connected=true;},Some(Update::Selected(r,messages))=>{app.dispatching=false;app.cards=messages.into_iter().filter(|m|!m.text.is_empty()).map(|m|Card{label:match m.role.as_str(){"user"=>"YOU","tool"=>"TOOL RESULT",_=>"ROCKETRY"}.into(),text:m.text,tone:if m.role=="user"{MUTED}else if m.role=="tool"{GREEN}else{CYAN},collapsed:m.role=="tool"}).collect();app.session_id=Some(r.session_id.clone());app.agent=r.agent.name.clone();app.demo=r.agent.provider=="demo";app.selected=Some(*r);app.usage=Usage::default();app.first_token_ms=None;app.scroll=0;app.approval=None;},Some(Update::Events(events))=>{for e in events{if app.selected.as_ref().is_some_and(|r|r.id==e.run_id){app.apply(e);}}app.connected=true;},Some(Update::Approved)=>{app.approval=None;app.notice="Approval decision saved".into();},Some(Update::Error(e))=>{app.dispatching=false;if app.overlay==Some(Overlay::Info){app.info=vec![Line::from(safe(&e))];}app.notice=e;app.connected=false;},Some(Update::Inspection{kind,agent,session,report})=>{if app.agent==agent&&app.session_id==session&&app.info_title==kind.to_uppercase(){app.info=inspection_lines(&kind,&report);}},None=>break}dirty=true;},_=tick.tick()=>{if app.active(){app.elapsed_ms=app.selected.as_ref().map(|r|now().saturating_sub(r.created_at)).unwrap_or(0);app.frame+=1;if !app.reduced_motion&&app.frame.is_multiple_of(6){dirty=true;}}}}if dirty&&last_draw.elapsed()>=Duration::from_millis(33){terminal.draw(|frame|render(frame,&app))?;dirty=false;last_draw=Instant::now();}}Ok(())}.await;
     drop(tx);
     job.abort();
     client.shutdown().await;
