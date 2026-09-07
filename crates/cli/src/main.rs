@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use rocketry_core::*;
-use rocketry_providers::{DemoProvider, HttpProvider, ProviderConfig};
+use rocketry_providers::{DemoProvider, HttpProvider, ProviderConfig, environment};
 use rocketry_runtime::{Harness, HarnessOptions, Workflow};
 use rocketry_store::Store;
 use rocketry_tools::{
@@ -137,12 +137,37 @@ impl Default for Config {
     }
 }
 fn configuration(cli: &Cli) -> Result<Config> {
+    configuration_with(cli, environment::discover(), environment::nonempty)
+}
+fn configuration_with(cli: &Cli, detected: Vec<(String, ProviderConfig)>, env: impl Fn(&str) -> Option<String>) -> Result<Config> {
     let mut config = if cli.config.exists() {
         toml::from_str::<Config>(&std::fs::read_to_string(&cli.config)?)
             .context("invalid rocketry.toml")?
     } else {
         Config::default()
     };
+    // Environment discovery adds profiles but never overwrites explicit configuration.
+    if cli.connect.is_none() {
+        let template = Config::default().agents.remove("navigator").unwrap();
+        let preferred = detected.iter().find(|(name, _)| name != "ollama" ||
+            ["OLLAMA_HOST", "OLLAMA_BASE_URL", "OLLAMA_MODEL", "OLLAMA_API_KEY"].iter().any(|key| env(key).is_some_and(|v| !v.trim().is_empty())))
+            .map(|(name, _)| name.clone());
+        for (name, provider) in detected {
+            config.providers.entry(name.clone()).or_insert(provider);
+            config.agents.entry(name.clone()).or_insert_with(|| {
+                let mut agent = template.clone();
+                agent.name = name.clone();
+                agent.provider = name;
+                agent.tools = default_tools();
+                agent
+            });
+        }
+        if !cli.config.exists() && let Some(preferred) = preferred {
+            let agent = config.agents.get_mut("navigator").unwrap();
+            agent.provider = preferred;
+            agent.tools = default_tools();
+        }
+    }
     if let Some(dir) = &cli.data_dir {
         config.data_dir = dir.clone();
     }
@@ -183,6 +208,28 @@ fn configuration(cli: &Cli) -> Result<Config> {
         );
     }
     Ok(config)
+}
+fn default_tools() -> Vec<String> {
+    ["read_file", "list_dir", "search", "write_file", "patch_file", "create_dir", "move_file", "remove_file", "execute",
+     "memory_put", "memory_search", "memory_list", "memory_delete", "session_memory_put", "session_memory_search", "session_memory_list", "session_memory_delete", "delegate"]
+        .into_iter().map(String::from).collect()
+}
+fn provider_status(config: &Config, remote: bool) -> Vec<rocketry_tui::ProviderStatus> {
+    if remote { return vec![]; }
+    let mut rows: Vec<_> = config.providers.iter().map(|(name, p)| rocketry_tui::ProviderStatus {
+        name: name.clone(), model: p.model.clone(),
+        status: match &p.api_key_env {
+            Some(key) if environment::nonempty(key).is_some() => format!("{key} detected · not validated"),
+            Some(key) => format!("Missing {key}"),
+            None => "No key required · connection not checked".into(),
+        },
+    }).collect();
+    for (name, key) in [("openai", "OPENAI_API_KEY"), ("anthropic", "ANTHROPIC_API_KEY")] {
+        if !config.providers.contains_key(name) {
+            rows.push(rocketry_tui::ProviderStatus { name: name.into(), model: "No profile".into(), status: format!("Missing {key}") });
+        }
+    }
+    rows
 }
 async fn harness(config: &Config, server: bool) -> Result<Harness> {
     let store = Store::open(&config.data_dir)?;
@@ -333,7 +380,7 @@ async fn main() -> Result<()> {
             .args(["info", "--format", "{{.ServerVersion}}"])
             .output()
             .await;
-        let credentials:Value=config.providers.iter().map(|(name,p)|(name.clone(),json!({"model":p.model,"credential_available":p.api_key_env.as_ref().is_none_or(|e|std::env::var_os(e).is_some())}))).collect::<serde_json::Map<_,_>>().into();
+        let credentials:Value=config.providers.iter().map(|(name,p)|(name.clone(),json!({"model":p.model,"credential_available":p.api_key_env.as_ref().is_none_or(|e|environment::nonempty(e).is_some())}))).collect::<serde_json::Map<_,_>>().into();
         println!(
             "{}",
             serde_json::to_string_pretty(
@@ -361,7 +408,7 @@ async fn main() -> Result<()> {
         None => Client::Local(Box::new(local.clone().unwrap())),
     };
     let result:Result<()>=async{match cli.command{
- None|Some(Commands::Chat)=>{anyhow::ensure!(io::stdout().is_terminal(),"TUI requires a terminal; use `rocketry run <input> --json`");rocketry_tui::run(client.clone(),config.default_agent).await?;},
+ None|Some(Commands::Chat)=>{anyhow::ensure!(io::stdout().is_terminal(),"TUI requires a terminal; use `rocketry run <input> --json`");rocketry_tui::run_with_providers(client.clone(),config.default_agent.clone(),provider_status(&config,cli.connect.is_some())).await?;},
  Some(Commands::Run{input,session})=>{let r=client.start(&config.default_agent,&input,session).await?;if !cli.json{eprintln!("[run {}]",r.id);}follow(&client,&r.id,cli.json).await?;},
  Some(Commands::Resume{id})=>{client.resume(&id).await?;follow(&client,&id,cli.json).await?;},Some(Commands::Cancel{id})=>client.cancel(&id).await?,Some(Commands::Approve{id,allow})=>client.approve(&id,allow).await?,
  Some(Commands::Sessions{export})=>{let value=if let Some(id)=export{json!({"session":id,"messages":client.messages(&id).await?})}else{json!(client.sessions().await?)};println!("{}",serde_json::to_string_pretty(&value)?);},

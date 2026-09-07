@@ -26,6 +26,21 @@ elif op == 'patch_file':
     result = {'patched': True, 'path': str(raw)}
 elif op == 'list_dir':
     result = [{'name': x.name, 'directory': x.is_dir()} for x in sorted(p.iterdir())[:1000]]
+elif op == 'create_dir':
+    p.mkdir(parents=True, exist_ok=True)
+    result = {'created': True, 'path': str(raw)}
+elif op == 'move_file':
+    destination = pathlib.Path(args['destination'])
+    assert not destination.is_absolute() and '..' not in destination.parts
+    target = (root / destination).resolve()
+    assert target.is_relative_to(root) and p.is_file()
+    os.link(p, target)
+    p.unlink()
+    result = {'moved': True, 'destination': str(destination)}
+elif op == 'remove_file':
+    assert p.is_file(), 'remove_file only removes files'
+    p.unlink()
+    result = {'removed': True, 'path': str(raw)}
 elif op == 'search':
     result = {'matches': [], 'visited': 0}
     stack = [p]

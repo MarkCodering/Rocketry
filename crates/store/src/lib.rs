@@ -193,6 +193,8 @@ PRAGMA user_version=1;")?;
         Ok(())
     }
     pub async fn memory_put(&self, ns: &str, key: &str, value: &str) -> Result<()> {
+        anyhow::ensure!(!key.trim().is_empty() && key.len() <= 256, "memory key must be 1-256 bytes");
+        anyhow::ensure!(value.len() <= 65536, "memory value exceeds 64 KiB");
         let (ns, key, value) = (ns.to_owned(), key.to_owned(), value.to_owned());
         self.with(move |db| {
             let tx = db.transaction()?;
@@ -216,6 +218,27 @@ PRAGMA user_version=1;")?;
     pub async fn memory_search(&self, ns: &str, query: &str) -> Result<Value> {
         let (ns, query) = (ns.to_owned(), query.to_owned());
         self.with(move|db|{let mut s=db.prepare("SELECT key,value FROM memory_fts WHERE namespace=?1 AND memory_fts MATCH ?2 ORDER BY rank LIMIT 20")?;let phrase=format!("\"{}\"",query.replace('"',"\"\""));let rows=s.query_map(params![ns,phrase],|r|Ok(serde_json::json!({"key":r.get::<_,String>(0)?,"value":r.get::<_,String>(1)?})))?;Ok(Value::Array(rows.collect::<rusqlite::Result<Vec<_>>>()?))}).await
+    }
+    /// Bounded, most recently written entries; large values are clearly marked.
+    pub async fn memory_list(&self, ns: &str) -> Result<Value> {
+        let ns = ns.to_owned();
+        self.with(move |db| {
+            let mut s = db.prepare("SELECT key,substr(value,1,4096),length(value)>4096 FROM memory WHERE namespace=?1 ORDER BY rowid DESC LIMIT 64")?;
+            let rows = s.query_map(params![ns], |r| Ok(serde_json::json!({
+                "key":r.get::<_,String>(0)?, "value":r.get::<_,String>(1)?, "truncated":r.get::<_,bool>(2)?
+            })))?;
+            Ok(Value::Array(rows.collect::<rusqlite::Result<Vec<_>>>()?))
+        }).await
+    }
+    pub async fn memory_delete(&self, ns: &str, key: &str) -> Result<bool> {
+        let (ns, key) = (ns.to_owned(), key.to_owned());
+        self.with(move |db| {
+            let tx = db.transaction()?;
+            let deleted = tx.execute("DELETE FROM memory WHERE namespace=?1 AND key=?2", params![ns,key])? > 0;
+            tx.execute("DELETE FROM memory_fts WHERE namespace=?1 AND key=?2", params![ns,key])?;
+            tx.commit()?;
+            Ok(deleted)
+        }).await
     }
     pub async fn artifact(&self, run: &str, bytes: Vec<u8>) -> Result<String> {
         let key = format!("{run}-{}", id());

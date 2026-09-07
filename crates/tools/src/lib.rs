@@ -125,6 +125,23 @@ fn file_operation(op: &str, args: Value, ctx: ToolContext) -> Result<Value> {
             out.sort_by_key(|v| v["name"].as_str().unwrap_or("").to_owned());
             Ok(json!(out))
         }
+        "create_dir" => {
+            std::fs::create_dir_all(path)?;
+            Ok(json!({"created":true,"path":args["path"]}))
+        }
+        "move_file" => {
+            let target = contained(&ctx.workspace, args["destination"].as_str().context("destination required")?)?;
+            anyhow::ensure!(path.is_file(), "source must be a file");
+            // A hard-link then unlink refuses to overwrite an existing destination.
+            std::fs::hard_link(&path, &target)?;
+            std::fs::remove_file(path)?;
+            Ok(json!({"moved":true,"destination":args["destination"]}))
+        }
+        "remove_file" => {
+            anyhow::ensure!(path.is_file(), "remove_file only removes files");
+            std::fs::remove_file(path)?;
+            Ok(json!({"removed":true,"path":args["path"]}))
+        }
         "search" => {
             let query = args["query"].as_str().context("query required")?;
             let mut stack = vec![path];
@@ -317,7 +334,7 @@ impl Tool for Builtin {
         self.spec.clone()
     }
     async fn execute(&self, args: Value, ctx: ToolContext) -> Result<Value> {
-        match self.spec.name.as_str() {
+        match self.spec.name.strip_prefix("session_").unwrap_or(&self.spec.name) {
             "memory_put" => {
                 self.store
                     .memory_put(
@@ -336,6 +353,8 @@ impl Tool for Builtin {
                     )
                     .await
             }
+            "memory_list" => self.store.memory_list(&ctx.namespace).await,
+            "memory_delete" => Ok(json!({"deleted":self.store.memory_delete(&ctx.namespace, args["key"].as_str().context("key required")?).await?})),
             _ => self.backend.execute(&self.spec.name, args, ctx).await,
         }
     }
@@ -381,16 +400,25 @@ pub fn builtins(backend: Arc<dyn ExecutionBackend>, store: Store) -> ToolRegistr
         ),
         (
             "memory_put",
-            "Store explicit session-namespace memory",
+            "Remember a durable fact for this agent across sessions; do not store secrets",
             Effect::Write,
             vec!["key", "value"],
         ),
         (
             "memory_search",
-            "Search explicit memory",
+            "Search this agent's long-term memory",
             Effect::Read,
             vec!["query"],
         ),
+        ("memory_list", "List this agent's long-term memories (64 newest, values capped at 4096 characters)", Effect::Read, vec![]),
+        ("memory_delete", "Forget a long-term memory by key", Effect::Write, vec!["key"]),
+        ("session_memory_put", "Save short-term working notes for this session", Effect::Write, vec!["key", "value"]),
+        ("session_memory_search", "Search this session's working notes", Effect::Read, vec!["query"]),
+        ("session_memory_list", "List this session's working notes", Effect::Read, vec![]),
+        ("session_memory_delete", "Forget a session working note", Effect::Write, vec!["key"]),
+        ("create_dir", "Create a workspace directory and its parents", Effect::Write, vec!["path"]),
+        ("move_file", "Move a workspace file without overwriting the destination (same filesystem)", Effect::Write, vec!["path", "destination"]),
+        ("remove_file", "Delete one workspace file; never recursively delete directories", Effect::Write, vec!["path"]),
     ] {
         let props: serde_json::Map<String, Value> = fields
             .iter()
