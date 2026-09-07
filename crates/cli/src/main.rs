@@ -139,7 +139,11 @@ impl Default for Config {
 fn configuration(cli: &Cli) -> Result<Config> {
     configuration_with(cli, environment::discover(), environment::nonempty)
 }
-fn configuration_with(cli: &Cli, detected: Vec<(String, ProviderConfig)>, env: impl Fn(&str) -> Option<String>) -> Result<Config> {
+fn configuration_with(
+    cli: &Cli,
+    detected: Vec<(String, ProviderConfig)>,
+    env: impl Fn(&str) -> Option<String>,
+) -> Result<Config> {
     let mut config = if cli.config.exists() {
         toml::from_str::<Config>(&std::fs::read_to_string(&cli.config)?)
             .context("invalid rocketry.toml")?
@@ -149,8 +153,19 @@ fn configuration_with(cli: &Cli, detected: Vec<(String, ProviderConfig)>, env: i
     // Environment discovery adds profiles but never overwrites explicit configuration.
     if cli.connect.is_none() {
         let template = Config::default().agents.remove("navigator").unwrap();
-        let preferred = detected.iter().find(|(name, _)| name != "ollama" ||
-            ["OLLAMA_HOST", "OLLAMA_BASE_URL", "OLLAMA_MODEL", "OLLAMA_API_KEY"].iter().any(|key| env(key).is_some_and(|v| !v.trim().is_empty())))
+        let preferred = detected
+            .iter()
+            .find(|(name, _)| {
+                name != "ollama"
+                    || [
+                        "OLLAMA_HOST",
+                        "OLLAMA_BASE_URL",
+                        "OLLAMA_MODEL",
+                        "OLLAMA_API_KEY",
+                    ]
+                    .iter()
+                    .any(|key| env(key).is_some_and(|v| !v.trim().is_empty()))
+            })
             .map(|(name, _)| name.clone());
         for (name, provider) in detected {
             config.providers.entry(name.clone()).or_insert(provider);
@@ -162,7 +177,9 @@ fn configuration_with(cli: &Cli, detected: Vec<(String, ProviderConfig)>, env: i
                 agent
             });
         }
-        if !cli.config.exists() && let Some(preferred) = preferred {
+        if !cli.config.exists()
+            && let Some(preferred) = preferred
+        {
             let agent = config.agents.get_mut("navigator").unwrap();
             agent.provider = preferred;
             agent.tools = default_tools();
@@ -210,23 +227,59 @@ fn configuration_with(cli: &Cli, detected: Vec<(String, ProviderConfig)>, env: i
     Ok(config)
 }
 fn default_tools() -> Vec<String> {
-    ["read_file", "list_dir", "search", "write_file", "patch_file", "create_dir", "move_file", "remove_file", "execute",
-     "memory_put", "memory_search", "memory_list", "memory_delete", "session_memory_put", "session_memory_search", "session_memory_list", "session_memory_delete", "delegate"]
-        .into_iter().map(String::from).collect()
+    [
+        "read_file",
+        "list_dir",
+        "search",
+        "write_file",
+        "patch_file",
+        "create_dir",
+        "move_file",
+        "remove_file",
+        "execute",
+        "memory_put",
+        "memory_search",
+        "memory_list",
+        "memory_delete",
+        "session_memory_put",
+        "session_memory_search",
+        "session_memory_list",
+        "session_memory_delete",
+        "delegate",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect()
 }
 fn provider_status(config: &Config, remote: bool) -> Vec<rocketry_tui::ProviderStatus> {
-    if remote { return vec![]; }
-    let mut rows: Vec<_> = config.providers.iter().map(|(name, p)| rocketry_tui::ProviderStatus {
-        name: name.clone(), model: p.model.clone(),
-        status: match &p.api_key_env {
-            Some(key) if environment::nonempty(key).is_some() => format!("{key} detected · not validated"),
-            Some(key) => format!("Missing {key}"),
-            None => "No key required · connection not checked".into(),
-        },
-    }).collect();
-    for (name, key) in [("openai", "OPENAI_API_KEY"), ("anthropic", "ANTHROPIC_API_KEY")] {
+    if remote {
+        return vec![];
+    }
+    let mut rows: Vec<_> = config
+        .providers
+        .iter()
+        .map(|(name, p)| rocketry_tui::ProviderStatus {
+            name: name.clone(),
+            model: p.model.clone(),
+            status: match &p.api_key_env {
+                Some(key) if environment::nonempty(key).is_some() => {
+                    format!("{key} detected · not validated")
+                }
+                Some(key) => format!("Missing {key}"),
+                None => "No key required · connection not checked".into(),
+            },
+        })
+        .collect();
+    for (name, key) in [
+        ("openai", "OPENAI_API_KEY"),
+        ("anthropic", "ANTHROPIC_API_KEY"),
+    ] {
         if !config.providers.contains_key(name) {
-            rows.push(rocketry_tui::ProviderStatus { name: name.into(), model: "No profile".into(), status: format!("Missing {key}") });
+            rows.push(rocketry_tui::ProviderStatus {
+                name: name.into(),
+                model: "No profile".into(),
+                status: format!("Missing {key}"),
+            });
         }
     }
     rows

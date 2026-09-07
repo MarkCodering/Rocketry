@@ -14,9 +14,33 @@ pub fn discover_with(env: impl Fn(&str) -> Option<String>) -> Vec<(String, Provi
     let get = |name: &str| env(name).filter(|v| !v.trim().is_empty());
     let mut profiles = Vec::new();
     for (name, protocol, key, model_var, model, base_var, base) in [
-        ("openai", Protocol::Openai, "OPENAI_API_KEY", "OPENAI_MODEL", "gpt-4.1", "OPENAI_BASE_URL", "https://api.openai.com/v1"),
-        ("anthropic", Protocol::Anthropic, "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "claude-sonnet-4-5", "ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1"),
-        ("ollama", Protocol::Compatible, "OLLAMA_API_KEY", "OLLAMA_MODEL", "qwen3:8b", "OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+        (
+            "openai",
+            Protocol::Openai,
+            "OPENAI_API_KEY",
+            "OPENAI_MODEL",
+            "gpt-4.1",
+            "OPENAI_BASE_URL",
+            "https://api.openai.com/v1",
+        ),
+        (
+            "anthropic",
+            Protocol::Anthropic,
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_MODEL",
+            "claude-sonnet-4-5",
+            "ANTHROPIC_BASE_URL",
+            "https://api.anthropic.com/v1",
+        ),
+        (
+            "ollama",
+            Protocol::Compatible,
+            "OLLAMA_API_KEY",
+            "OLLAMA_MODEL",
+            "qwen3:8b",
+            "OLLAMA_BASE_URL",
+            "http://localhost:11434/v1",
+        ),
     ] {
         let credential = get(key).is_some();
         if !credential && name != "ollama" {
@@ -38,14 +62,17 @@ pub fn discover_with(env: impl Fn(&str) -> Option<String>) -> Vec<(String, Provi
                 base_url.push_str("/v1");
             }
         }
-        profiles.push((name.into(), ProviderConfig {
-            protocol,
-            model: get(model_var).unwrap_or_else(|| model.into()),
-            base_url,
-            api_key_env: credential.then(|| key.into()),
-            input_price_per_million: None,
-            output_price_per_million: None,
-        }));
+        profiles.push((
+            name.into(),
+            ProviderConfig {
+                protocol,
+                model: get(model_var).unwrap_or_else(|| model.into()),
+                base_url,
+                api_key_env: credential.then(|| key.into()),
+                input_price_per_million: None,
+                output_price_per_million: None,
+            },
+        ));
     }
     profiles
 }
@@ -67,7 +94,11 @@ mod tests {
         assert_eq!(profiles[0].1.api_key_env.as_deref(), Some("OPENAI_API_KEY"));
         assert_eq!(profiles[1].1.base_url, "http://localhost:12000/v1");
         assert!(profiles[1].1.api_key_env.is_none());
-        assert!(!serde_json::to_string(&profiles).unwrap().contains("secret-sentinel"));
+        assert!(
+            !serde_json::to_string(&profiles)
+                .unwrap()
+                .contains("secret-sentinel")
+        );
     }
     #[test]
     fn ollama_key_and_base_override() {

@@ -193,7 +193,10 @@ PRAGMA user_version=1;")?;
         Ok(())
     }
     pub async fn memory_put(&self, ns: &str, key: &str, value: &str) -> Result<()> {
-        anyhow::ensure!(!key.trim().is_empty() && key.len() <= 256, "memory key must be 1-256 bytes");
+        anyhow::ensure!(
+            !key.trim().is_empty() && key.len() <= 256,
+            "memory key must be 1-256 bytes"
+        );
         anyhow::ensure!(value.len() <= 65536, "memory value exceeds 64 KiB");
         let (ns, key, value) = (ns.to_owned(), key.to_owned(), value.to_owned());
         self.with(move |db| {
@@ -234,11 +237,18 @@ PRAGMA user_version=1;")?;
         let (ns, key) = (ns.to_owned(), key.to_owned());
         self.with(move |db| {
             let tx = db.transaction()?;
-            let deleted = tx.execute("DELETE FROM memory WHERE namespace=?1 AND key=?2", params![ns,key])? > 0;
-            tx.execute("DELETE FROM memory_fts WHERE namespace=?1 AND key=?2", params![ns,key])?;
+            let deleted = tx.execute(
+                "DELETE FROM memory WHERE namespace=?1 AND key=?2",
+                params![ns, key],
+            )? > 0;
+            tx.execute(
+                "DELETE FROM memory_fts WHERE namespace=?1 AND key=?2",
+                params![ns, key],
+            )?;
             tx.commit()?;
             Ok(deleted)
-        }).await
+        })
+        .await
     }
     pub async fn artifact(&self, run: &str, bytes: Vec<u8>) -> Result<String> {
         let key = format!("{run}-{}", id());

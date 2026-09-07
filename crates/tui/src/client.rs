@@ -70,10 +70,26 @@ impl Client {
             Self::Local(h) => h.inspect_context(agent, session).await,
             Self::Remote { url, .. } => {
                 let mut endpoint = reqwest::Url::parse(url)?;
-                endpoint.path_segments_mut().map_err(|_| anyhow::anyhow!("invalid server URL"))?
-                    .pop_if_empty().extend(["v1", "agents", agent, "context"]);
-                if let Some(session) = session { endpoint.query_pairs_mut().append_pair("session", session); }
-                self.get(&format!("{}{}", endpoint.path().strip_prefix(reqwest::Url::parse(url)?.path().trim_end_matches('/')).unwrap_or(endpoint.path()), endpoint.query().map(|q| format!("?{q}")).unwrap_or_default())).await
+                endpoint
+                    .path_segments_mut()
+                    .map_err(|_| anyhow::anyhow!("invalid server URL"))?
+                    .pop_if_empty()
+                    .extend(["v1", "agents", agent, "context"]);
+                if let Some(session) = session {
+                    endpoint.query_pairs_mut().append_pair("session", session);
+                }
+                self.get(&format!(
+                    "{}{}",
+                    endpoint
+                        .path()
+                        .strip_prefix(reqwest::Url::parse(url)?.path().trim_end_matches('/'))
+                        .unwrap_or(endpoint.path()),
+                    endpoint
+                        .query()
+                        .map(|q| format!("?{q}"))
+                        .unwrap_or_default()
+                ))
+                .await
             }
         }
     }

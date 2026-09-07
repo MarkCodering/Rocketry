@@ -1,7 +1,9 @@
 //! Mission Control terminal UI. Rendering is pure; I/O runs in a separate task.
 pub mod client;
+mod commands;
 use anyhow::Result;
 use client::Client;
+use commands::*;
 use crossterm::{
     event::{
         self, DisableBracketedPaste, EnableBracketedPaste, Event as TermEvent, KeyCode, KeyEvent,
@@ -37,6 +39,8 @@ pub struct Card {
 #[derive(Clone, PartialEq)]
 pub enum Overlay {
     Palette,
+    Providers,
+    Info,
     Agents,
     Search,
     Cancel,
@@ -49,7 +53,19 @@ struct CachedCard {
     fingerprint: u64,
     lines: Vec<Line<'static>>,
 }
+#[derive(Clone)]
+pub struct ProviderStatus {
+    pub name: String,
+    pub model: String,
+    pub status: String,
+}
 pub struct App {
+    pub providers: Vec<ProviderStatus>,
+    pub info_title: String,
+    pub info: Vec<Line<'static>>,
+    pub slash_menu: usize,
+    pub slash_dismissed: bool,
+    pub dispatching: bool,
     cache: std::cell::RefCell<Vec<CachedCard>>,
     pub agents: BTreeMap<String, Agent>,
     pub agent: String,
@@ -84,6 +100,12 @@ pub struct App {
 impl App {
     pub fn new(agent: String, backend: String) -> Self {
         Self {
+            providers: vec![],
+            info_title: String::new(),
+            info: vec![],
+            slash_menu: 0,
+            slash_dismissed: false,
+            dispatching: false,
             cache: Default::default(),
             agents: BTreeMap::new(),
             agent,
@@ -121,6 +143,9 @@ impl App {
         self.session_id = None;
         self.cards.clear();
         self.composer.clear();
+        self.search.clear();
+        self.slash_dismissed = false;
+        self.slash_menu = 0;
         self.tool = None;
         self.approval = None;
         self.usage = Usage::default();
@@ -391,7 +416,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         layout[2],
     );
     frame.render_widget(
-        Paragraph::new("  ^K commands   Tab pane   ^N new   ^F find   ↑↓ navigate   ^Q exit")
+        Paragraph::new("  / commands   ^K menu   Tab pane   ^N new   ^F find   ^Q exit")
             .style(Style::default().fg(MUTED).bg(PANEL)),
         layout[3],
     );
@@ -577,14 +602,26 @@ fn conversation(frame: &mut Frame, area: Rect, app: &App) {
             ),
             Line::from(""),
             Line::styled(
-                format!("  Active agent: {}", app.agent),
+                format!(
+                    "  Active agent: {} · {}",
+                    app.agent,
+                    app.agents
+                        .get(&app.agent)
+                        .and_then(|a| app.providers.iter().find(|p| p.name == a.provider))
+                        .map(|p| p.model.as_str())
+                        .unwrap_or(if app.demo {
+                            "demo"
+                        } else {
+                            "configured profile"
+                        })
+                ),
                 Style::default().fg(CYAN),
             ),
             Line::styled(
                 if app.demo {
                     "  Local demo selected · no credentials required"
                 } else {
-                    "  Ctrl+K → Switch agent / model profile"
+                    "  /agent choose a profile · /providers check credentials"
                 },
                 Style::default().fg(MUTED),
             ),
@@ -666,13 +703,13 @@ fn conversation(frame: &mut Frame, area: Rect, app: &App) {
     let title = if app.active() {
         "COMPOSER · run active"
     } else {
-        "COMPOSER · Enter send / Alt+Enter newline"
+        "COMPOSER · Enter send · / commands"
     };
     let editor = block(title, app.focus == 1);
     let input = editor.inner(parts[1]);
     frame.render_widget(editor, parts[1]);
     let display = if app.composer.is_empty() {
-        "Describe what you want to accomplish…"
+        "Describe a mission, or type / for commands…"
     } else {
         &app.composer
     };
@@ -693,6 +730,46 @@ fn conversation(frame: &mut Frame, area: Rect, app: &App) {
             .saturating_sub(1)
             .min(input.height.saturating_sub(1) as usize) as u16;
         frame.set_cursor_position((input.x + x, input.y + y));
+    }
+    let matches = suggestions(app);
+    if !matches.is_empty() && app.overlay.is_none() {
+        let selected = app.slash_menu.min(matches.len() - 1);
+        let start = selected.saturating_sub(4);
+        let height = (matches.len().min(5) as u16 + 2).min(parts[0].height);
+        let rect = Rect::new(
+            area.x,
+            parts[1].y.saturating_sub(height),
+            area.width,
+            height,
+        );
+        let lines: Vec<_> = matches
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(5)
+            .map(|(i, c)| {
+                Line::styled(
+                    format!(
+                        "{} /{:<10} {}",
+                        if i == selected { "▸" } else { " " },
+                        c.name,
+                        c.description
+                    ),
+                    Style::default()
+                        .fg(if i == selected { CYAN } else { FG })
+                        .bg(if i == selected {
+                            Color::Rgb(31, 53, 65)
+                        } else {
+                            PANEL
+                        }),
+                )
+            })
+            .collect();
+        frame.render_widget(Clear, rect);
+        frame.render_widget(
+            Paragraph::new(lines).block(block("/ COMMANDS · ↑↓ select · Tab complete", true)),
+            rect,
+        );
     }
 }
 fn tool_details(call: &ToolCall) -> String {
@@ -794,17 +871,6 @@ fn inspector(frame: &mut Frame, area: Rect, app: &App) {
     }
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
-const COMMANDS: &[&str] = &[
-    "New mission",
-    "Switch agent / model profile",
-    "Review approval",
-    "Resume selected run",
-    "Toggle inspector",
-    "Expand / collapse tool cards",
-    "Reduced motion",
-    "Help",
-    "Quit",
-];
 fn overlay_render(frame: &mut Frame, app: &App, overlay: &Overlay) {
     let area = frame.area();
     let width = area.width.saturating_sub(4).min(76);
@@ -824,7 +890,12 @@ fn overlay_render(frame: &mut Frame, app: &App, overlay: &Overlay) {
                 .enumerate()
                 .map(|(i, s)| {
                     Line::styled(
-                        format!("{} {s}", if i == app.menu { "▸" } else { " " }),
+                        format!(
+                            "{} /{:<10} {}",
+                            if i == app.menu { "▸" } else { " " },
+                            s.name,
+                            s.description
+                        ),
                         Style::default().fg(if i == app.menu { CYAN } else { FG }),
                     )
                 })
@@ -841,13 +912,51 @@ fn overlay_render(frame: &mut Frame, app: &App, overlay: &Overlay) {
                             "{} {}  /  {}",
                             if i == app.menu { "▸" } else { " " },
                             a.name,
-                            a.provider
+                            app.providers
+                                .iter()
+                                .find(|p| p.name == a.provider)
+                                .map(|p| format!("{} · {}", a.provider, p.model))
+                                .unwrap_or_else(|| a.provider.clone())
                         ),
                         Style::default().fg(if i == app.menu { CYAN } else { FG }),
                     )
                 })
                 .collect(),
         ),
+        Overlay::Providers => {
+            let mut lines = vec![
+                Line::styled("CREDENTIAL DISCOVERY", Style::default().fg(CYAN)),
+                Line::from(""),
+            ];
+            if app.backend == "remote" {
+                lines.push(Line::from(
+                    "Credentials are managed by the connected server.",
+                ));
+                lines.push(Line::from(
+                    "Use /agent for server profiles; run doctor on the server.",
+                ));
+            } else {
+                for p in &app.providers {
+                    lines.push(Line::styled(
+                        format!("{} · {}", safe(&p.name), safe(&p.model)),
+                        Style::default().fg(CYAN),
+                    ));
+                    lines.push(Line::from(safe(&p.status)));
+                    lines.push(Line::from(""));
+                }
+                lines.push(Line::from(
+                    "Keys are never displayed. Detection does not validate access.",
+                ));
+                lines.push(Line::from(
+                    "Set environment variables before launch, then restart.",
+                ));
+                lines.push(Line::from(
+                    "/agent selects a profile · local Ollama needs no API key.",
+                ));
+            }
+            ("PROVIDERS", lines)
+        }
+        Overlay::Info => (app.info_title.as_str(), app.info.clone()),
         Overlay::Search => (
             "SEARCH FLIGHT LOG",
             vec![
@@ -894,6 +1003,10 @@ fn overlay_render(frame: &mut Frame, app: &App, overlay: &Overlay) {
                 Line::from(""),
                 Line::from("Policies are enforced by the runtime, including demo."),
                 Line::from("Tool content is data; terminal controls are stripped."),
+                Line::from("/ opens commands · ↑↓ select · Tab complete · Enter run"),
+                Line::from("/agent [profile] or /model [profile] selects a model profile"),
+                Line::from("/providers /memory /context /tools inspect runtime state"),
+                Line::from("// sends a literal leading slash; unknown commands stay local"),
                 Line::from("Esc closes this panel."),
             ],
         ),
@@ -937,6 +1050,11 @@ enum Action {
     Resume(String),
     Cancel(String),
     Refresh,
+    Inspect {
+        kind: String,
+        agent: String,
+        session: Option<String>,
+    },
 }
 enum Update {
     Catalog(Vec<Session>, Vec<Run>),
@@ -944,6 +1062,12 @@ enum Update {
     Events(Vec<Event>),
     Error(String),
     Approved,
+    Inspection {
+        kind: String,
+        agent: String,
+        session: Option<String>,
+        report: Value,
+    },
 }
 async fn worker(
     client: Client,
@@ -966,7 +1090,11 @@ async fn worker(
                         Action::Approve(id,allow)=>{client.approve(&id,allow).await?;updates.send(Update::Approved).await?;None},
                         Action::Resume(id)=>{client.resume(&id).await?;selected=Some(id);None},
                         Action::Cancel(id)=>{client.cancel(&id).await?;None},
-                        Action::Refresh=>{selected=None;cursor=0;None}
+                        Action::Refresh=>{selected=None;cursor=0;None},
+                        Action::Inspect{kind,agent,session}=>{
+                            let report=client.inspect(&agent,session.as_deref()).await?;
+                            updates.send(Update::Inspection{kind,agent,session,report}).await?;None
+                        }
                     };
                     if let Some(run)=run {
                         let messages=client.messages(&run.session_id).await?;
@@ -1106,58 +1234,52 @@ fn key(app: &mut App, k: KeyEvent, tx: &mpsc::Sender<Action>) -> bool {
                     KeyCode::Enter => {
                         app.overlay = None;
                         if overlay == Overlay::Agents {
-                            if let Some(a) = app.agents.values().nth(app.menu) {
-                                app.agent = a.name.clone();
-                                app.demo = a.provider == "demo";
-                                app.session_id = None;
+                            if let Some(name) = app.agents.keys().nth(app.menu).cloned() {
+                                switch_agent(app, &name, tx);
                             }
-                        } else {
-                            match app.menu {
-                                0 => {
-                                    app.reset();
-                                    send(tx, Action::Refresh, app);
-                                }
-                                1 => {
-                                    app.overlay = Some(Overlay::Agents);
-                                    app.menu = 0;
-                                }
-                                2 => app.overlay = Some(Overlay::Approval),
-                                3 => {
-                                    if let Some(r) = &app.selected {
-                                        send(tx, Action::Resume(r.id.clone()), app);
-                                    }
-                                }
-                                4 => {
-                                    app.inspector = !app.inspector;
-                                    app.focus = 2;
-                                }
-                                5 => {
-                                    let expand = app.cards.iter().any(|c| c.collapsed);
-                                    for c in &mut app.cards {
-                                        if c.label != "ROCKETRY" && c.label != "YOU" {
-                                            c.collapsed = !expand;
-                                        }
-                                    }
-                                }
-                                6 => app.reduced_motion = !app.reduced_motion,
-                                7 => app.overlay = Some(Overlay::Help),
-                                8 => {
-                                    if app.any_active() {
-                                        app.overlay = Some(Overlay::Quit);
-                                    } else {
-                                        return true;
-                                    }
-                                }
-                                _ => {}
-                            }
+                        } else if let Some(command) = COMMANDS.get(app.menu) {
+                            return execute_command(app, command.name, tx);
                         }
                     }
                     _ => {}
                 }
             }
-            Overlay::Help => {}
+            Overlay::Help | Overlay::Providers | Overlay::Info => {}
         }
         return false;
+    }
+    if app.focus == 1 && app.composer.starts_with('/') && !app.composer.starts_with("//") {
+        let matches = suggestions(app);
+        match k.code {
+            KeyCode::Up if !matches.is_empty() => {
+                app.slash_menu = app.slash_menu.saturating_sub(1);
+                return false;
+            }
+            KeyCode::Down if !matches.is_empty() => {
+                app.slash_menu = (app.slash_menu + 1).min(matches.len() - 1);
+                return false;
+            }
+            KeyCode::Tab if !matches.is_empty() => {
+                app.composer = format!("/{} ", matches[app.slash_menu.min(matches.len() - 1)].name);
+                return false;
+            }
+            KeyCode::Esc => {
+                app.slash_dismissed = true;
+                return false;
+            }
+            KeyCode::Enter if !k.modifiers.contains(KeyModifiers::ALT) => {
+                let input = if !matches.is_empty() {
+                    format!("/{}", matches[app.slash_menu.min(matches.len() - 1)].name)
+                } else {
+                    app.composer.clone()
+                };
+                app.composer.clear();
+                app.slash_menu = 0;
+                app.slash_dismissed = false;
+                return execute_command(app, &input, tx);
+            }
+            _ => {}
+        }
     }
     match k.code {
         KeyCode::Tab => {
@@ -1198,8 +1320,11 @@ fn key(app: &mut App, k: KeyEvent, tx: &mpsc::Sender<Action>) -> bool {
             app.composer.push('\n')
         }
         KeyCode::Enter if app.focus == 1 => {
-            if !app.active() && !app.composer.trim().is_empty() {
-                let input = std::mem::take(&mut app.composer);
+            if !app.active() && !app.dispatching && !app.composer.trim().is_empty() {
+                let mut input = std::mem::take(&mut app.composer);
+                if input.starts_with("//") {
+                    input.remove(0);
+                }
                 send(
                     tx,
                     Action::Start {
@@ -1210,13 +1335,18 @@ fn key(app: &mut App, k: KeyEvent, tx: &mpsc::Sender<Action>) -> bool {
                     app,
                 );
                 app.notice = "Dispatching mission…".into();
+                app.dispatching = true;
             }
         }
         KeyCode::Backspace if app.focus == 1 => {
             app.composer.pop();
+            app.slash_menu = 0;
+            app.slash_dismissed = false;
         }
         KeyCode::Char(c) if app.focus == 1 && app.composer.len() < 65536 => {
             app.composer.push(c);
+            app.slash_menu = 0;
+            app.slash_dismissed = false;
         }
         _ => {}
     }
@@ -1230,12 +1360,20 @@ impl Drop for TerminalGuard {
     }
 }
 pub async fn run(client: Client, agent: String) -> Result<()> {
+    run_with_providers(client, agent, vec![]).await
+}
+pub async fn run_with_providers(
+    client: Client,
+    agent: String,
+    providers: Vec<ProviderStatus>,
+) -> Result<()> {
     let backend = if matches!(client, Client::Remote { .. }) {
         "remote"
     } else {
         "local"
     };
     let mut app = App::new(agent, backend.into());
+    app.providers = providers;
     app.agents = client.agents().await?;
     if !app.agents.contains_key(&app.agent) {
         app.agent = app.agents.keys().next().cloned().unwrap_or_default();
@@ -1261,7 +1399,7 @@ pub async fn run(client: Client, agent: String) -> Result<()> {
     let mut tick = tokio::time::interval(Duration::from_millis(34));
     let mut dirty = true;
     let mut last_draw = Instant::now() - Duration::from_secs(1);
-    let result:Result<()>=async{loop{tokio::select!{event=input.next()=>match event{Some(Ok(TermEvent::Key(k)))=>{if key(&mut app,k,&tx){break;}dirty=true;},Some(Ok(TermEvent::Paste(text)))=>{let room=65536usize.saturating_sub(app.composer.len());app.composer.extend(safe(&text).chars().take(room));dirty=true;},Some(Ok(TermEvent::Resize(..)))=>dirty=true,Some(Err(e))=>return Err(e.into()),None=>break,_=>{}},update=inbox.recv()=>{match update{Some(Update::Catalog(s,r))=>{app.sessions=s;app.runs=r;app.connected=true;},Some(Update::Selected(r,messages))=>{app.cards=messages.into_iter().filter(|m|!m.text.is_empty()).map(|m|Card{label:match m.role.as_str(){"user"=>"YOU","tool"=>"TOOL RESULT",_=>"ROCKETRY"}.into(),text:m.text,tone:if m.role=="user"{MUTED}else if m.role=="tool"{GREEN}else{CYAN},collapsed:m.role=="tool"}).collect();app.session_id=Some(r.session_id.clone());app.agent=r.agent.name.clone();app.demo=r.agent.provider=="demo";app.selected=Some(*r);app.usage=Usage::default();app.first_token_ms=None;app.scroll=0;app.approval=None;},Some(Update::Events(events))=>{for e in events{app.apply(e);}app.connected=true;},Some(Update::Approved)=>{app.approval=None;app.notice="Approval decision saved".into();},Some(Update::Error(e))=>{app.notice=e;app.connected=false;},None=>break}dirty=true;},_=tick.tick()=>{if app.active(){app.elapsed_ms=app.selected.as_ref().map(|r|now().saturating_sub(r.created_at)).unwrap_or(0);app.frame+=1;if !app.reduced_motion&&app.frame.is_multiple_of(6){dirty=true;}}}}if dirty&&last_draw.elapsed()>=Duration::from_millis(33){terminal.draw(|frame|render(frame,&app))?;dirty=false;last_draw=Instant::now();}}Ok(())}.await;
+    let result:Result<()>=async{loop{tokio::select!{event=input.next()=>match event{Some(Ok(TermEvent::Key(k)))=>{if key(&mut app,k,&tx){break;}dirty=true;},Some(Ok(TermEvent::Paste(text)))=>{let room=65536usize.saturating_sub(app.composer.len());if app.overlay.is_none(){app.composer.extend(safe(&text).chars().take(room));app.slash_menu=0;app.slash_dismissed=false;}dirty=true;},Some(Ok(TermEvent::Resize(..)))=>dirty=true,Some(Err(e))=>return Err(e.into()),None=>break,_=>{}},update=inbox.recv()=>{match update{Some(Update::Catalog(s,r))=>{app.sessions=s;app.runs=r;app.connected=true;},Some(Update::Selected(r,messages))=>{app.dispatching=false;app.cards=messages.into_iter().filter(|m|!m.text.is_empty()).map(|m|Card{label:match m.role.as_str(){"user"=>"YOU","tool"=>"TOOL RESULT",_=>"ROCKETRY"}.into(),text:m.text,tone:if m.role=="user"{MUTED}else if m.role=="tool"{GREEN}else{CYAN},collapsed:m.role=="tool"}).collect();app.session_id=Some(r.session_id.clone());app.agent=r.agent.name.clone();app.demo=r.agent.provider=="demo";app.selected=Some(*r);app.usage=Usage::default();app.first_token_ms=None;app.scroll=0;app.approval=None;},Some(Update::Events(events))=>{for e in events{app.apply(e);}app.connected=true;},Some(Update::Approved)=>{app.approval=None;app.notice="Approval decision saved".into();},Some(Update::Error(e))=>{app.dispatching=false;if app.overlay==Some(Overlay::Info){app.info=vec![Line::from(safe(&e))];}app.notice=e;app.connected=false;},Some(Update::Inspection{kind,agent,session,report})=>{if app.agent==agent&&app.session_id==session&&app.info_title==kind.to_uppercase(){app.info=inspection_lines(&kind,&report);}},None=>break}dirty=true;},_=tick.tick()=>{if app.active(){app.elapsed_ms=app.selected.as_ref().map(|r|now().saturating_sub(r.created_at)).unwrap_or(0);app.frame+=1;if !app.reduced_motion&&app.frame.is_multiple_of(6){dirty=true;}}}}if dirty&&last_draw.elapsed()>=Duration::from_millis(33){terminal.draw(|frame|render(frame,&app))?;dirty=false;last_draw=Instant::now();}}Ok(())}.await;
     drop(tx);
     job.abort();
     client.shutdown().await;

@@ -216,10 +216,18 @@ async fn artifact(State(s): State<AppState>, Path(id): Path<String>) -> ApiResul
         .into_response())
 }
 #[derive(Deserialize)]
-struct ContextQuery { session: Option<String> }
+struct ContextQuery {
+    session: Option<String>,
+}
 #[utoipa::path(get,path="/v1/agents/{id}/context",params(("id"=String,Path),("session"=Option<String>,Query)),responses((status=200,body=Value)))]
-async fn context(State(s): State<AppState>, Path(id): Path<String>, Query(q): Query<ContextQuery>) -> ApiResult<Json<Value>> {
-    Ok(Json(s.harness.inspect_context(&id, q.session.as_deref()).await?))
+async fn context(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<ContextQuery>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(
+        s.harness.inspect_context(&id, q.session.as_deref()).await?,
+    ))
 }
 async fn agents(State(s): State<AppState>) -> Json<Value> {
     Json(json!(s.harness.agents))
@@ -242,7 +250,8 @@ async fn metrics(State(s): State<AppState>) -> String {
 }
 #[derive(OpenApi)]
 #[openapi(
-    paths(context,
+    paths(
+        context,
         workflow,
         sessions,
         create_session,

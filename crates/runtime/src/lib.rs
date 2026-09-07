@@ -1,7 +1,7 @@
 //! Durable agent execution shared by the SDK, HTTP service, CLI and TUI.
 mod context;
-pub use context::session_namespace;
 use anyhow::{Context, Result, bail};
+pub use context::session_namespace;
 use futures::{
     FutureExt,
     future::BoxFuture,
@@ -474,8 +474,13 @@ impl Harness {
                     "shared model turn budget exhausted"
                 );
                 self.emit(&run.id, EventKind::ModelStarted).await?;
-                let prepared = self.prepare_context(&run.agent, Some(&run.session_id), history).await?;
-                let (before, after) = (prepared.before, prepared.after.saturating_sub(prepared.memory_bytes));
+                let prepared = self
+                    .prepare_context(&run.agent, Some(&run.session_id), history)
+                    .await?;
+                let (before, after) = (
+                    prepared.before,
+                    prepared.after.saturating_sub(prepared.memory_bytes),
+                );
                 if before > after {
                     self.emit(&run.id, EventKind::Compacted { before, after })
                         .await?;
@@ -631,7 +636,11 @@ impl Harness {
                 let ctx = ToolContext {
                     run_id: run.id.clone(),
                     workspace: run.workspace.clone(),
-                    namespace: if call.name.starts_with("session_memory_") { session_namespace(&run.session_id, &run.agent.name) } else { run.agent.name.clone() },
+                    namespace: if call.name.starts_with("session_memory_") {
+                        session_namespace(&run.session_id, &run.agent.name)
+                    } else {
+                        run.agent.name.clone()
+                    },
                     cancel: scope.cancel.child_token(),
                 };
                 self.tools
